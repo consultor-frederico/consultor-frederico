@@ -160,7 +160,6 @@ def main():
         tel = c_tel.text_input("WhatsApp", key="tel_input", on_change=formatar_tel_callback)
         mail = c_mail.text_input("E-mail", value=d.get("email", ""))
         
-        # 🆕 LÓGICA DE OPÇÕES POR PERFIL
         if tipo == "Advogado":
             opcoes = ["Liquidação", "Iniciais", "Impugnação", "Rescisão", "Horas Extras", "Outros"]
         else:
@@ -169,8 +168,9 @@ def main():
         servico = st.selectbox("Tipo de Cálculo:", opcoes)
         
         c_adm, c_sai = st.columns(2)
-        adm = c_adm.text_input("Admissão (DDMMYYYY)", key="adm_input", on_change=formatar_data_adm_callback)
-        sai = c_sai.text_input("Saída (DDMMYYYY)", key="sai_input", on_change=formatar_data_sai_callback)
+        # 🆕 FORMATO ALTERADO PARA (DDMMAAAA)
+        adm = c_adm.text_input("Admissão (DDMMAAAA)", key="adm_input", on_change=formatar_data_adm_callback)
+        sai = c_sai.text_input("Saída (DDMMAAAA)", key="sai_input", on_change=formatar_data_sai_callback)
         salario = st.text_input("Salário Base", key="sal_input", on_change=formatar_salario_callback)
         
         relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""))
