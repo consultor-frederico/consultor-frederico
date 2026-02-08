@@ -41,6 +41,15 @@ def ler_conteudo_arquivo(uploaded_file):
         return f"\n--- CONTEÚDO DO ANEXO ({uploaded_file.name}) ---\n{texto_extraido}\n"
     except Exception as e: return f"\n[Erro leitura: {e}]\n"
 
+# --- 🆕 MÁSCARAS AUTOMÁTICAS ---
+
+def formatar_cnpj_auto(val):
+    """Aplica máscara xx.xxx.xxx/xxxx-xx em 14 dígitos"""
+    limpo = re.sub(r'\D', '', str(val))
+    if len(limpo) == 14:
+        return f"{limpo[:2]}.{limpo[2:5]}.{limpo[5:8]}/{limpo[8:12]}-{limpo[12:]}"
+    return val
+
 def formatar_moeda(val):
     limpo = re.sub(r'\D', '', str(val))
     if not limpo: return ""
@@ -51,12 +60,6 @@ def formatar_data_auto(val):
     limpo = re.sub(r'\D', '', str(val))
     if len(limpo) == 8:
         return f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
-    return val
-
-def formatar_cnpj(val):
-    limpo = re.sub(r'\D', '', str(val))
-    if len(limpo) == 14:
-        return f"{limpo[:2]}.{limpo[2:5]}.{limpo[5:8]}/{limpo[8:12]}-{limpo[12:]}"
     return val
 
 def validar_email(email):
@@ -151,7 +154,7 @@ def salvar_na_planilha(client_sheets, dados):
         sheet.append_row([
             dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], dados['email'],
             dados['melhor_horario'], dados['servico'], dados['analise_cliente'], dados['analise_tecnica'],
-            "Processado em Memória (Não Salvo)", dados['status_agenda']
+            "Processado em Memória", dados['status_agenda']
         ])
     except: pass
 
@@ -173,9 +176,9 @@ def main():
         col1, col2 = st.columns(2)
         if tipo == "Empresa":
             nome = col1.text_input("Razão Social", value=d.get("nome", ""))
-            raw_cnpj = col2.text_input("CNPJ (apenas números)", value=d.get("cnpj", ""), placeholder="00000000000100")
-            cnpj = formatar_cnpj(raw_cnpj)
-            if cnpj: st.caption(f"CNPJ: **{cnpj}**")
+            raw_cnpj = col2.text_input("CNPJ (apenas 14 números)", value=d.get("cnpj", ""), placeholder="Ex: 12345678000199")
+            cnpj = formatar_cnpj_auto(raw_cnpj)
+            if cnpj: st.caption(f"Formato: **{cnpj}**")
             n_resp = st.text_input("Nome do Responsável", value=d.get("nome_resp", ""))
         else:
             nome = col1.text_input("Nome Completo", value=d.get("nome", ""))
@@ -200,7 +203,7 @@ def main():
         
         raw_salario = st.text_input("Salário Base (apenas números)", value=d.get("salario", ""), placeholder="Ex: 250000")
         salario = formatar_moeda(raw_salario)
-        if salario: st.caption(f"Salário: **{salario}**")
+        if salario: st.caption(f"Valor: **{salario}**")
         
         relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""), height=100)
 
@@ -208,7 +211,7 @@ def main():
             if not nome or not tel: 
                 st.warning("Preencha Nome e Telefone.")
             elif tipo == "Empresa" and len(re.sub(r'\D', '', raw_cnpj)) != 14:
-                st.error("CNPJ deve conter 14 números.")
+                st.error("CNPJ inválido! Digite os 14 números.")
             elif mail and not validar_email(mail):
                 st.error("E-mail inválido!")
             elif not validar_data_final(adm) or not validar_data_final(sai):
@@ -235,7 +238,7 @@ def main():
 
     if st.session_state.fase == 3:
         st.subheader("3. Complemento e Documentos")
-        st.warning("🔒 Análise temporária. Seus arquivos não serão salvos.")
+        st.warning("🔒 Análise temporária pela IA. Seus arquivos não serão salvos.")
         comp = st.text_input("Observação Adicional (Opcional):")
         arquivo_uploaded = st.file_uploader("Anexar Documentos para a IA ler", type=["pdf", "txt", "jpg", "png"])
         if arquivo_uploaded:
@@ -256,10 +259,9 @@ def main():
                 tel_f = formatar_telefone(d['tel'])
                 
                 p_t = f"""
-                AJA COMO O PERITO FREDERICO. contexto {d['tipo']}.
+                AJA COMO O PERITO FREDERICO. Perfil {d['tipo']}.
                 DADOS: {d['tecnico']}. RELATO: {d['relato']}. ANEXO: {st.session_state.conteudo_arquivo}.
-                Determine Dificuldade e Valor Sugerido (Mercado 2026).
-                Extraia o máximo de informações do anexo (processos, partes, valores).
+                Extraia Valor da Causa/Condenação se possível. Dê a Dificuldade e Valor Sugerido (Mercado 2026).
                 """
                 
                 analise_ia = consultar_ia(p_t, "Perito Judicial Sênior", 0.2)
