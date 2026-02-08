@@ -66,22 +66,17 @@ def formatar_tel_callback():
 
 # --- FUNÇÕES DE SISTEMA ---
 
-# 🛡️ CAMADA DE SEGURANÇA: Verificação de tipo e extração de texto
 def ler_conteudo_arquivo(uploaded_file):
     if uploaded_file is None: return ""
     try:
-        # Bloqueio de Imagens (OCR não suportado nativamente por PyPDF2)
         if uploaded_file.type in ["image/png", "image/jpeg", "image/jpg"]:
-            return "[AVISO: O sistema não lê texto de imagens automaticamente. Por favor, detalhe os dados no resumo técnico.]"
-            
+            return "[AVISO: O sistema não lê texto de imagens automaticamente. Por favor, detalhe os dados no relato abaixo.]"
         if uploaded_file.type == "application/pdf":
             leitor = PyPDF2.PdfReader(uploaded_file)
             texto = "\n".join([p.extract_text() for p in leitor.pages if p.extract_text()])
-            # Alerta para PDF sem texto (ex: escaneado como imagem)
             if not texto.strip():
-                return "[AVISO: Este PDF parece ser uma imagem/digitalização sem texto extraível. Descreva os dados importantes no relato.]"
+                return "[AVISO: Este PDF parece ser uma imagem/digitalização sem texto extraível. Por favor, detalhe os dados no relato abaixo.]"
             return texto
-            
         return str(uploaded_file.read(), "utf-8")
     except: return "[Erro na leitura técnica do arquivo]"
 
@@ -194,14 +189,18 @@ def main():
 
     if st.session_state.fase == 3:
         st.subheader("3. Documentos")
-        # 🛡️ Suporte visual para avisar tipos de arquivos aceitos
-        arquivo = st.file_uploader("Anexar Documento (PDF ou TXT)", type=["pdf", "txt", "jpg", "png"])
+        # 🆕 ALTERAÇÃO: Apenas PDF e TXT visíveis no seletor
+        arquivo = st.file_uploader("Anexar Documento (PDF ou TXT)", type=["pdf", "txt"])
         if arquivo: 
-            # Processa o arquivo aplicando a camada de segurança
             conteudo = ler_conteudo_arquivo(arquivo)
             st.session_state.conteudo_arquivo = conteudo
+            
+            # 🆕 ALTERAÇÃO: Se houver aviso de imagem/digitalização, abre o quadro com o relato
             if "[AVISO" in conteudo:
                 st.warning(conteudo)
+                with st.expander("📝 Seu Relato da Fase anterior", expanded=True):
+                    st.write(st.session_state.dados_form.get("relato", ""))
+                st.info("Caso o arquivo seja uma digitalização, certifique-se de que os dados principais já foram descritos no relato acima.")
             else:
                 st.success("Conteúdo do arquivo processado com sucesso.")
         
@@ -215,7 +214,6 @@ def main():
         if st.button("✅ Confirmar Tudo"):
             with st.spinner("Gravando dados..."):
                 d = st.session_state.dados_form
-                # 🛡️ IA Validada: Envia o conteúdo do arquivo (mesmo se for aviso de erro) para contexto
                 p_t = f"Perfil {d['tipo']}. Cálculo de {d['servico']}. Salário {d['salario']}. Relato: {d['relato']}. CONTEÚDO DO ARQUIVO: {st.session_state.get('conteudo_arquivo', 'Não enviado')}. Dê valor sugerido e dificuldade técnica."
                 analise_ia = consultar_ia(p_t, "Perito Judicial")
                 status_agenda = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
