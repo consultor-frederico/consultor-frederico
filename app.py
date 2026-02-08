@@ -9,7 +9,6 @@ import PyPDF2
 from io import BytesIO
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
 from datetime import datetime, timedelta
 
 # --- 🚨 CONFIGURAÇÕES 🚨 ---
@@ -41,11 +40,6 @@ def ler_conteudo_arquivo(uploaded_file):
             texto_extraido = str(uploaded_file.read(), "utf-8")
         return f"\n--- CONTEÚDO DO ANEXO ({uploaded_file.name}) ---\n{texto_extraido}\n"
     except Exception as e: return f"\n[Erro leitura: {e}]\n"
-
-def validar_cnpj(cnpj):
-    cnpj = re.sub(r'[^0-9]', '', cnpj)
-    if len(cnpj) != 14 or len(set(cnpj)) == 1: return False
-    return True
 
 def callback_formatar_telefone():
     val = st.session_state.tel_input
@@ -91,15 +85,11 @@ def consultar_ia(mensagem, sistema, temperatura=0.5):
         return resp['choices'][0]['message']['content']
     except: return "Sistema indisponível."
 
-def eh_dia_util(data):
-    if data.weekday() >= 5: return False
-    return data.strftime("%d/%m") not in FERIADOS_NACIONAIS
-
 def buscar_horarios_livres(service_calendar):
     sugestoes = []
     dia_foco = datetime.now() + timedelta(days=2)
     while len(sugestoes) < 10:
-        if not eh_dia_util(dia_foco):
+        if dia_foco.weekday() >= 5 or dia_foco.strftime("%d/%m") in FERIADOS_NACIONAIS:
             dia_foco += timedelta(days=1)
             continue
         comeco = dia_foco.replace(hour=0, minute=0, second=0).isoformat() + 'Z'
@@ -119,7 +109,6 @@ def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
         if not match: return "Erro Data"
         dia_mes, hora, minuto = match.group(1), int(match.group(2)), int(match.group(3))
         dt_inicio = datetime.strptime(f"{datetime.now().year}/{dia_mes} {hora}:{minuto}", "%Y/%d/%m %H:%M")
-        if dt_inicio < datetime.now(): dt_inicio = dt_inicio.replace(year=datetime.now().year + 1)
         evento = {
             'summary': f'Cálculo: {nome} ({servico})',
             'description': f'Tel: {tel}\nSolicitação via Web App.',
@@ -134,11 +123,11 @@ def salvar_na_planilha(client_sheets, dados):
     try:
         sheet = client_sheets.open(NOME_PLANILHA_GOOGLE).sheet1
         if not sheet.get_all_values(): 
-            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Email", "Horário", "Serviço", "Resumo Cliente", "Análise Técnica", "Status Arquivo", "Status"])
+            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Email", "Horário", "Serviço", "Análise Cliente", "Análise Técnica", "Status Arquivo", "Status"])
         sheet.append_row([
             dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], dados['email'],
             dados['melhor_horario'], dados['servico'], dados['analise_cliente'], dados['analise_tecnica'],
-            "Processado em Memória (Não Salvo)", dados['status_agenda']
+            "Processado (Não Armazenado)", dados['status_agenda']
         ])
     except: pass
 
@@ -172,32 +161,20 @@ def main():
         col1, col2 = st.columns(2)
         if tipo == "Empresa":
             nome = col1.text_input("Razão Social", value=d.get("nome", ""))
-            cnpj = col2.text_input("CNPJ", value=d.get("cnpj", ""))
             n_resp = st.text_input("Nome Responsável", value=d.get("nome_resp", ""))
         else:
             nome = col1.text_input("Nome Completo", value=d.get("nome", ""))
             n_resp = nome
-            cnpj = ""
             
         c_tel, c_mail = st.columns(2)
         tel = c_tel.text_input("WhatsApp", value=d.get("tel", ""), key="tel_input", on_change=callback_formatar_telefone)
         mail = c_mail.text_input("E-mail", value=d.get("email", ""))
         
-        if tipo == "Advogado":
-            opcoes_servico = ["Liquidação de Sentença", "Inicial/Estimativa", "Impugnação", "Rescisão", "Horas Extras", "Outros"]
-        else:
-            opcoes_servico = ["Rescisão", "Horas Extras", "Outros"]
-        
-        try:
-            serv_idx = opcoes_servico.index(d.get("servico", ""))
-        except:
-            serv_idx = 0
-            
+        opcoes_servico = ["Liquidação de Sentença", "Inicial/Estimativa", "Impugnação", "Rescisão", "Horas Extras", "Outros"] if tipo == "Advogado" else ["Rescisão", "Horas Extras", "Outros"]
+        try: serv_idx = opcoes_servico.index(d.get("servico", ""))
+        except: serv_idx = 0
         servico = st.selectbox("Tipo de Cálculo:", opcoes_servico, index=serv_idx)
         
-        c_adm, c_sai = st.columns(2)
-        adm = c_adm.text_input("Admissão", value=d.get("adm", ""))
-        sai = c_sai.text_input("Saída", value=d.get("sai", ""))
         salario = st.text_input("Salário Base", value=d.get("salario", ""))
         relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""), height=100)
 
@@ -207,9 +184,8 @@ def main():
                 n_tratado = formatar_nome_com_titulo(n_resp, tipo)
                 st.session_state.dados_form.update({
                     "nome": nome, "nome_resp": n_resp, "tel": tel, "email": mail,
-                    "cnpj": cnpj, "tipo": tipo, "servico": servico, "relato": relato,
-                    "adm": adm, "sai": sai, "salario": salario,
-                    "tecnico": f"Tipo: {servico}. Salário: {salario}. Período: {adm} a {sai}."
+                    "tipo": tipo, "servico": servico, "relato": relato, "salario": salario,
+                    "tecnico": f"Tipo: {servico}. Salário: {salario}."
                 })
                 p_c = f"Aja como o Frederico. O cliente {n_tratado} relatou: '{relato}'. Resuma que entendeu em 1 parágrafo curto."
                 st.session_state.ia_resumo_cliente = consultar_ia(p_c, "Consultor Jurídico")
@@ -224,21 +200,18 @@ def main():
         if col_s.button("✅ Sim, está correto"): st.session_state.fase = 3; st.rerun()
 
     if st.session_state.fase == 3:
-        st.subheader("3. Complemento e Documentos para Análise")
-        st.warning("🔒 Seus arquivos NÃO serão armazenados. Eles serão utilizados apenas para uma análise inicial da IA.")
+        st.subheader("3. Documentos para Análise")
+        st.warning("🔒 Análise apenas em memória. Seus arquivos não serão salvos no Drive.")
         
         comp = st.text_input("Observação Adicional (Opcional):")
-        
-        # REMOVIDA A RESTRIÇÃO: Agora todos podem enviar arquivos
         arquivo_uploaded = st.file_uploader("Anexar Documentos para a IA ler", type=["pdf", "txt", "jpg", "png"])
+        
         if arquivo_uploaded:
             if "image" in arquivo_uploaded.type:
-                st.session_state.conteudo_arquivo = "📸 [Imagem enviada - Análise visual necessária pela IA]"
+                st.session_state.conteudo_arquivo = "📸 [Imagem enviada para análise visual]"
             else:
                 st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo_uploaded)
-        else:
-            st.session_state.conteudo_arquivo = "Nenhum arquivo enviado."
-
+        
         if st.button("🔽 Seguir para Agendamento"):
             if comp: st.session_state.dados_form["relato"] += f" [Extra: {comp}]"
             st.session_state.fase = 4
@@ -246,44 +219,31 @@ def main():
 
     if st.session_state.fase == 4:
         st.subheader("🗓️ Finalizar Agendamento")
-        opcoes = buscar_horarios_livres(service_calendar) if service_calendar else ["Erro Agenda"]
+        opcoes = buscar_horarios_livres(service_calendar)
         horario = st.selectbox("Escolha o Horário:", opcoes)
         if st.button("✅ Confirmar Agendamento"):
-            with st.spinner("IA analisando complexidade e valores..."):
+            with st.spinner("IA analisando tudo..."):
                 d = st.session_state.dados_form
                 tel_f = formatar_telefone(d['tel'])
                 
-                guia_precos = """
-                TABELA DE REFERÊNCIA (Mercado 2026):
-                - Simples (Rescisórios): R$ 350 a R$ 600.
-                - Médios (Horas Extras/Insalubridade): R$ 800 a R$ 1.800.
-                - Complexos (Liquidação/Perícia): R$ 2.000+ ou 1% a 3% da causa.
-                """
+                guia_precos = "Simples: R$350-600 | Médio: R$800-1800 | Complexo: R$2000+"
+                p_t = f"Aja como Fred Perito. Dados: {d['tecnico']}. Relato: {d['relato']}. Anexo: {st.session_state.conteudo_arquivo}. Dê a dificuldade e o valor sugerido (Mercado 2026) com base em: {guia_precos}"
                 
-                p_t = f"""
-                AJA COMO O PERITO FREDERICO.
-                Dados: {d['tecnico']}. Relato: {d['relato']}. Conteúdo Anexo: {st.session_state.conteudo_arquivo}.
-                
-                TAREFA:
-                1. Analise riscos técnicos.
-                2. Aponte a DIFICULDADE do cálculo (Baixa, Média ou Alta) e justifique.
-                3. Estipule um VALOR ESTIMADO de honorários seguindo este guia:
-                {guia_precos}
-                """
-                
-                analise = consultar_ia(p_t, "Perito Judicial Sênior", 0.2)
+                analise_ia = consultar_ia(p_t, "Perito Judicial Sênior", 0.2)
                 status = criar_evento_agenda(service_calendar, horario, d['nome_resp'], tel_f, d['servico'])
                 
+                # SALVA TUDO NA PLANILHA GOOGLE
                 salvar_na_planilha(client_sheets, {
                     "data_hora": datetime.now().strftime("%d/%m %H:%M"),
                     "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": tel_f, "email": d['email'],
                     "melhor_horario": horario, "servico": d['servico'],
-                    "analise_cliente": st.session_state.ia_resumo_cliente, "analise_tecnica": analise,
+                    "analise_cliente": st.session_state.ia_resumo_cliente, # <--- Salvando o resumo confirmado
+                    "analise_tecnica": analise_ia, # <--- Salvando a análise de preço/dificuldade
                     "status_agenda": status
                 })
                 
-                st.success(f"✅ **Confirmado!** {d['nome']}, agendamos para {horario}.")
-                st.markdown(f"### Análise do Perito:\n{analise}")
+                st.success(f"✅ Agendado para {horario}!")
+                st.markdown(f"### Análise do Perito:\n{analise_ia}")
                 st.session_state.fase = 5
                 st.rerun()
 
