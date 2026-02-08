@@ -168,7 +168,6 @@ def main():
         servico = st.selectbox("Tipo de Cálculo:", opcoes)
         
         c_adm, c_sai = st.columns(2)
-        # 🆕 FORMATO ALTERADO PARA (DDMMAAAA)
         adm = c_adm.text_input("Admissão (DDMMAAAA)", key="adm_input", on_change=formatar_data_adm_callback)
         sai = c_sai.text_input("Saída (DDMMAAAA)", key="sai_input", on_change=formatar_data_sai_callback)
         salario = st.text_input("Salário Base", key="sal_input", on_change=formatar_salario_callback)
@@ -184,7 +183,14 @@ def main():
                     "relato": relato, "salario": st.session_state.sal_input, "adm": adm, "sai": sai
                 })
                 with st.spinner("IA entendendo o caso..."):
-                    resumo = consultar_ia(f"Resuma em 1 parágrafo: {relato}", "Consultor Jurídico")
+                    # 🆕 PROMPT AJUSTADO PARA SER MAIS CURTO E OBJETIVO
+                    p_resumo = f"""
+                    Aja como Frederico, um consultor de cálculos. 
+                    O cliente relatou o seguinte: '{relato}'.
+                    Apenas diga de forma amigável que entendeu o que ele precisa e cite o objetivo principal.
+                    Seja muito breve (máximo 2 frases). Não dê explicações técnicas agora.
+                    """
+                    resumo = consultar_ia(p_resumo, "Consultor Jurídico")
                     st.session_state.ia_resumo_cliente = resumo
                     st.session_state.fase = 2; st.rerun()
 
