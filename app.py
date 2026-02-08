@@ -101,29 +101,24 @@ def consultar_ia(mensagem, sistema, temperatura=0.5):
         return resp['choices'][0]['message']['content']
     except: return "IA temporariamente indisponível."
 
-# 🆕 MODIFICAÇÃO: Lógica de Busca de Horários com verificação de agenda real
 def buscar_horarios_livres(service_calendar):
     sugestoes = []
     dia_foco = datetime.now() + timedelta(days=1)
     
     while len(sugestoes) < 12:
-        # Pula finais de semana e feriados
         if dia_foco.weekday() >= 5 or dia_foco.strftime("%d/%m") in FERIADOS_NACIONAIS:
             dia_foco += timedelta(days=1)
             continue
         
-        # Define intervalo comercial: 09h às 18h
         inicio_iso = dia_foco.replace(hour=9, minute=0, second=0).isoformat() + 'Z'
         fim_iso = dia_foco.replace(hour=18, minute=0, second=0).isoformat() + 'Z'
         
-        # Consulta eventos ocupados
         events_result = service_calendar.events().list(
             calendarId=ID_AGENDA, timeMin=inicio_iso, timeMax=fim_iso,
             singleEvents=True, orderBy='startTime'
         ).execute()
         events = events_result.get('items', [])
         
-        # Mapeia horas ocupadas
         horas_ocupadas = []
         for event in events:
             start = event['start'].get('dateTime', event['start'].get('date'))
@@ -132,10 +127,8 @@ def buscar_horarios_livres(service_calendar):
                 horas_ocupadas.append(h_inicio)
 
         dia_txt = f"{dia_foco.strftime('%d/%m')} ({['Seg','Ter','Qua','Qui','Sex'][dia_foco.weekday()]})"
-        
-        # Gera slots comerciais livres
         for h in range(9, 18):
-            if h == 12: continue # Respeita almoço (12:00 - 13:00)
+            if h == 12: continue 
             if h not in horas_ocupadas:
                 sugestoes.append(f"{dia_txt} às {h}:00")
         
@@ -187,13 +180,13 @@ def main():
 
     client_sheets, service_calendar = conectar_google()
 
-    # 🆕 MODIFICAÇÃO: Cabeçalho com Nome em Destaque e Logotipo
+    # 🆕 MODIFICAÇÃO: Cabeçalho com Nome em Destaque, Cargo maior e Calculadora Moderna
     col_logo, col_text = st.columns([1, 4])
     with col_logo:
-        st.markdown("<h1 style='text-align: center; margin: 0;'>🧮⚖️</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align: center; margin-top: 5px;'>📟</h1>", unsafe_allow_html=True)
     with col_text:
-        st.markdown("<h2 style='margin-bottom: 0;'>Frederico Novotny</h2>", unsafe_allow_html=True)
-        st.markdown("<p style='font-size: 0.9em; color: gray; margin-top: 0;'>Consultor Trabalhista</p>", unsafe_allow_html=True)
+        st.markdown("<h1 style='margin-bottom: -15px; padding-bottom: 0;'>Frederico Novotny</h1>", unsafe_allow_html=True)
+        st.markdown("<h3 style='color: #555; margin-top: 0; padding-top: 0;'>Consultor Trabalhista</h3>", unsafe_allow_html=True)
     st.divider()
 
     if st.session_state.fase == 1:
@@ -264,7 +257,6 @@ def main():
 
     if st.session_state.fase == 4:
         st.subheader("🗓️ Finalizar")
-        # 🆕 Busca horários filtrando os reais ocupados na agenda Google
         with st.spinner("Consultando horários disponíveis..."):
             horarios = buscar_horarios_livres(service_calendar)
         
