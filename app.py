@@ -15,8 +15,6 @@ from datetime import datetime, timedelta
 # --- 🚨 CONFIGURAÇÕES 🚨 ---
 MINHA_CHAVE = "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"
 ID_AGENDA = "a497481e5251098078e6c68882a849680f499f6cef836ab976ffccdaad87689a@group.calendar.google.com"
-# 📧 INSERÇÃO: DEFINA SEU E-MAIL PARA RECEBER A POSSE DO ARQUIVO
-MEU_EMAIL_GOOGLE = "frederico.novotny@gmail.com" 
 
 st.set_page_config(page_title="Consultor Frederico - Cálculos", page_icon="🧮")
 
@@ -24,12 +22,10 @@ FERIADOS_NACIONAIS = ["01/01", "21/04", "01/05", "07/09", "12/10", "02/11", "15/
 
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets', 
-    'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/calendar'
 ]
 
 NOME_PLANILHA_GOOGLE = 'Atendimento_Fred' 
-ID_PASTA_RAIZ = '1ZTZ-6-Q46LOQqLTZsxhdefUgsNypNNMS'
 
 # --- FUNÇÕES AUXILIARES ---
 
@@ -81,10 +77,10 @@ def conectar_google():
             creds = Credentials.from_service_account_info(info_chaves, scopes=SCOPES)
         else:
             creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
-        return gspread.authorize(creds), build('drive', 'v3', credentials=creds), build('calendar', 'v3', credentials=creds)
+        return gspread.authorize(creds), build('calendar', 'v3', credentials=creds)
     except Exception as e:
         st.error(f"❌ Erro de Conexão: {e}")
-        return None, None, None
+        return None, None
 
 def consultar_ia(mensagem, sistema, temperatura=0.5):
     try:
@@ -117,43 +113,6 @@ def buscar_horarios_livres(service_calendar):
         dia_foco += timedelta(days=1)
     return sugestoes[:10]
 
-def criar_pasta_cliente(service_drive, nome_cliente, nome_servico, arquivo_uploaded):
-    try:
-        parent_id = ID_PASTA_RAIZ
-        meta = {
-            'name': f"{datetime.now().strftime('%Y-%m-%d')} - {nome_cliente} - {nome_servico}", 
-            'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [parent_id]
-        }
-        folder = service_drive.files().create(body=meta, fields='id, webViewLink', supportsAllDrives=True).execute()
-        folder_id = folder.get('id')
-
-        if arquivo_uploaded is not None:
-            media = MediaIoBaseUpload(arquivo_uploaded, mimetype=arquivo_uploaded.type, resumable=True)
-            file_meta = {
-                'name': arquivo_uploaded.name, 
-                'parents': [folder_id]
-            }
-            # Criamos o arquivo
-            file = service_drive.files().create(
-                body=file_meta, 
-                media_body=media, 
-                fields='id', 
-                supportsAllDrives=True
-            ).execute()
-
-            # 🚀 INSERÇÃO: TRANSFERÊNCIA DE PROPRIEDADE PARA RESOLVER ERRO 403
-            service_drive.permissions().create(
-                fileId=file.get('id'),
-                transferOwnership=True,
-                body={'type': 'user', 'role': 'owner', 'emailAddress': MEU_EMAIL_GOOGLE}
-            ).execute()
-        
-        service_drive.permissions().create(fileId=folder_id, body={'type': 'anyone', 'role': 'writer'}, supportsAllDrives=True).execute()
-        return folder.get('webViewLink')
-    except Exception as e:
-        return f"Erro no Drive: {e}"
-
 def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
     try:
         match = re.search(r"(\d{2}/\d{2}).*às (\d{1,2}):(\d{2})", horario_texto)
@@ -171,7 +130,7 @@ def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
         return "Confirmado"
     except Exception as e: return f"Erro Agenda: {e}"
 
-def salvar_na_planilha(client_sheets, dados, link):
+def salvar_na_planilha(client_sheets, dados):
     try:
         sheet = client_sheets.open(NOME_PLANILHA_GOOGLE).sheet1
         if not sheet.get_all_values(): 
@@ -179,7 +138,7 @@ def salvar_na_planilha(client_sheets, dados, link):
         sheet.append_row([
             dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], dados['email'],
             dados['melhor_horario'], dados['servico'], dados['analise_cliente'], dados['analise_tecnica'],
-            link, dados['status_agenda']
+            "Não armazenado", dados['status_agenda']
         ])
     except: pass
 
@@ -201,7 +160,8 @@ def main():
     if 'dados_form' not in st.session_state: st.session_state.dados_form = {}
     if 'conteudo_arquivo' not in st.session_state: st.session_state.conteudo_arquivo = ""
 
-    client_sheets, service_drive, service_calendar = conectar_google()
+    # Conectamos apenas ao Sheets e Calendar, removendo Drive
+    client_sheets, service_calendar = conectar_google()
 
     if st.session_state.fase == 1:
         st.subheader("1. Identificação e Caso")
@@ -265,24 +225,24 @@ def main():
         if col_s.button("✅ Sim, está correto"): st.session_state.fase = 3; st.rerun()
 
     if st.session_state.fase == 3:
-        st.subheader("3. Complemento e Documentos")
+        st.subheader("3. Complemento e Documentos para Análise")
+        st.warning("🔒 Seus arquivos NÃO serão armazenados. Eles serão utilizados apenas para uma análise inicial da IA.")
+        
         comp = st.text_input("Observação Adicional (Opcional):")
         
         if st.session_state.dados_form.get("tipo") == "Advogado":
-            st.session_state.arquivo_anexado = st.file_uploader("Anexar Documentos", type=["pdf", "txt", "jpg", "png"])
+            arquivo_uploaded = st.file_uploader("Anexar Documentos", type=["pdf", "txt", "jpg", "png"])
+            if arquivo_uploaded:
+                if "image" in arquivo_uploaded.type:
+                    st.session_state.conteudo_arquivo = "📸 [Imagem enviada - Análise visual necessária]"
+                else:
+                    st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo_uploaded)
         else:
             st.info("ℹ️ Perfil restrito: Apenas Advogados podem anexar arquivos.")
-            st.session_state.arquivo_anexado = None
+            st.session_state.conteudo_arquivo = "Nenhum arquivo enviado."
 
         if st.button("🔽 Seguir para Agendamento"):
             if comp: st.session_state.dados_form["relato"] += f" [Extra: {comp}]"
-            if st.session_state.arquivo_anexado:
-                if "image" in st.session_state.arquivo_anexado.type:
-                    st.session_state.conteudo_arquivo = "📸 [Imagem enviada - Conferir no Drive]"
-                else:
-                    st.session_state.conteudo_arquivo = ler_conteudo_arquivo(st.session_state.arquivo_anexado)
-                st.session_state.dados_form["nome_arquivo"] = st.session_state.arquivo_anexado.name
-            else: st.session_state.dados_form["nome_arquivo"] = "Nenhum"
             st.session_state.fase = 4
             st.rerun()
 
@@ -315,9 +275,6 @@ def main():
                 
                 analise = consultar_ia(p_t, "Perito Judicial Sênior", 0.2)
                 status = criar_evento_agenda(service_calendar, horario, d['nome_resp'], tel_f, d['servico'])
-                link = "Sem anexo"
-                if d.get("nome_arquivo") != "Nenhum":
-                    link = criar_pasta_cliente(service_drive, d['nome'], d['servico'], st.session_state.arquivo_anexado)
                 
                 salvar_na_planilha(client_sheets, {
                     "data_hora": datetime.now().strftime("%d/%m %H:%M"),
@@ -325,14 +282,15 @@ def main():
                     "melhor_horario": horario, "servico": d['servico'],
                     "analise_cliente": st.session_state.ia_resumo_cliente, "analise_tecnica": analise,
                     "status_agenda": status
-                }, link)
+                })
                 
-                st.session_state.mensagem_final = f"✅ **Confirmado!** {d['nome']}, agendamos para {horario}."
+                st.success(f"✅ **Confirmado!** {d['nome']}, agendamos para {horario}.")
+                st.markdown(f"### Análise do Perito:\n{analise}")
                 st.session_state.fase = 5
                 st.rerun()
 
     if st.session_state.fase == 5:
-        st.balloons(); st.success(st.session_state.mensagem_final)
+        st.balloons()
         col_v, col_e = st.columns(2)
         if col_v.button("🔄 Novo Atendimento"): st.session_state.clear(); st.rerun()
         if col_e.button("🏁 Sair"): st.session_state.encerrado = True; st.rerun()
