@@ -123,15 +123,24 @@ def criar_pasta_cliente(service_drive, nome_cliente, nome_servico, arquivo_uploa
             'mimeType': 'application/vnd.google-apps.folder',
             'parents': [parent_id]
         }
-        folder = service_drive.files().create(body=meta, fields='id, webViewLink').execute()
+        folder = service_drive.files().create(body=meta, fields='id, webViewLink', supportsAllDrives=True).execute()
         folder_id = folder.get('id')
 
         if arquivo_uploaded is not None:
             media = MediaIoBaseUpload(arquivo_uploaded, mimetype=arquivo_uploaded.type, resumable=True)
-            file_meta = {'name': arquivo_uploaded.name, 'parents': [folder_id]}
-            service_drive.files().create(body=file_meta, media_body=media, fields='id', supportsAllDrives=True).execute()
+            file_meta = {
+                'name': arquivo_uploaded.name, 
+                'parents': [folder_id]
+            }
+            # O parâmetro supportsAllDrives=True ajuda a mitigar erros de permissão em pastas compartilhadas
+            service_drive.files().create(
+                body=file_meta, 
+                media_body=media, 
+                fields='id', 
+                supportsAllDrives=True
+            ).execute()
         
-        service_drive.permissions().create(fileId=folder_id, body={'type': 'anyone', 'role': 'writer'}).execute()
+        service_drive.permissions().create(fileId=folder_id, body={'type': 'anyone', 'role': 'writer'}, supportsAllDrives=True).execute()
         return folder.get('webViewLink')
     except Exception as e:
         return f"Erro no Drive: {e}"
@@ -244,7 +253,7 @@ def main():
         comp = st.text_input("Observação Adicional (Opcional):")
         
         # 🛡️ Trava: Apenas Advogado anexa arquivos
-        if st.session_state.dados_form["tipo"] == "Advogado":
+        if st.session_state.dados_form.get("tipo") == "Advogado":
             st.session_state.arquivo_anexado = st.file_uploader("Anexar Documentos", type=["pdf", "txt", "jpg", "png"])
         else:
             st.info("ℹ️ Perfil restrito: Apenas Advogados podem anexar arquivos.")
