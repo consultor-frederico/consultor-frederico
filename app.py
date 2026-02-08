@@ -41,6 +41,18 @@ def ler_conteudo_arquivo(uploaded_file):
         return f"\n--- CONTEÚDO DO ANEXO ({uploaded_file.name}) ---\n{texto_extraido}\n"
     except Exception as e: return f"\n[Erro leitura: {e}]\n"
 
+def formatar_data_auto(val):
+    limpo = re.sub(r'\D', '', str(val))
+    if len(limpo) == 8:
+        return f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
+    return val
+
+def validar_email(email):
+    return "@" in email and "." in email
+
+def validar_data_final(data_str):
+    return re.match(r"^\d{2}/\d{2}/\d{4}$", data_str) is not None
+
 def callback_formatar_telefone():
     val = st.session_state.tel_input
     if not val: return
@@ -133,17 +145,6 @@ def salvar_na_planilha(client_sheets, dados):
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
-    if 'encerrado' in st.session_state:
-        st.image("https://cdn-icons-png.flaticon.com/512/2643/2643501.png", width=90)
-        st.success("✅ **Sessão Finalizada com Sucesso!**")
-        if st.button("🔄 Iniciar Nova Sessão"):
-            st.session_state.clear()
-            st.rerun()
-        return
-
-    st.image("https://cdn-icons-png.flaticon.com/512/2643/2643501.png", width=90)
-    st.title("Consultor Frederico - Cálculos Trabalhistas")
-
     if 'fase' not in st.session_state: st.session_state.fase = 1
     if 'ia_resumo_cliente' not in st.session_state: st.session_state.ia_resumo_cliente = ""
     if 'dados_form' not in st.session_state: st.session_state.dados_form = {}
@@ -159,15 +160,8 @@ def main():
         tipo = st.radio("Perfil:", perfil_list, horizontal=True, index=perfil_idx)
         
         col1, col2 = st.columns(2)
-        if tipo == "Empresa":
-            nome = col1.text_input("Razão Social", value=d.get("nome", ""))
-            cnpj = col2.text_input("CNPJ", value=d.get("cnpj", ""))
-            n_resp = st.text_input("Nome Responsável", value=d.get("nome_resp", ""))
-        else:
-            nome = col1.text_input("Nome Completo", value=d.get("nome", ""))
-            n_resp = nome
-            cnpj = ""
-            
+        nome = col1.text_input("Nome/Razão Social", value=d.get("nome", ""))
+        
         c_tel, c_mail = st.columns(2)
         tel = c_tel.text_input("WhatsApp", value=d.get("tel", ""), key="tel_input", on_change=callback_formatar_telefone)
         mail = c_mail.text_input("E-mail", value=d.get("email", ""))
@@ -177,19 +171,33 @@ def main():
         except: serv_idx = 0
         servico = st.selectbox("Tipo de Cálculo:", opcoes_servico, index=serv_idx)
         
+        c_adm, c_sai = st.columns(2)
+        raw_adm = c_adm.text_input("Admissão (digite apenas números)", value=d.get("adm", ""), placeholder="Ex: 01052020")
+        raw_sai = c_sai.text_input("Saída (digite apenas números)", value=d.get("sai", ""), placeholder="Ex: 10022026")
+        
+        adm = formatar_data_auto(raw_adm)
+        sai = formatar_data_auto(raw_sai)
+        
         salario = st.text_input("Salário Base", value=d.get("salario", ""))
         relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""), height=100)
 
         if st.button("💬 Analisar Solicitação"):
-            if not nome or not tel: st.warning("Preencha Nome e Telefone.")
+            if not nome or not tel: 
+                st.warning("Preencha Nome e Telefone.")
+            elif mail and not validar_email(mail):
+                st.error("E-mail inválido! O e-mail deve conter '@' e '.'")
+            elif not validar_data_final(adm):
+                st.error("Data de Admissão inválida! Digite 8 números (Ex: 01012020)")
+            elif not validar_data_final(sai):
+                st.error("Data de Saída inválida! Digite 8 números (Ex: 01012024)")
             else:
-                n_tratado = formatar_nome_com_titulo(n_resp, tipo)
                 st.session_state.dados_form.update({
-                    "nome": nome, "nome_resp": n_resp, "tel": tel, "email": mail,
-                    "cnpj": cnpj, "tipo": tipo, "servico": servico, "relato": relato, "salario": salario,
-                    "tecnico": f"Tipo: {servico}. Salário: {salario}."
+                    "nome": nome, "tel": tel, "email": mail, "tipo": tipo, 
+                    "servico": servico, "relato": relato, "salario": salario,
+                    "adm": adm, "sai": sai,
+                    "tecnico": f"Tipo: {servico}. Salário: {salario}. Período: {adm} a {sai}."
                 })
-                p_c = f"Aja como o Frederico. O cliente {n_tratado} relatou: '{relato}'. Resuma que entendeu em 1 parágrafo curto."
+                p_c = f"Aja como o Frederico. Entenda o relato: '{relato}'. Resuma em 1 parágrafo curto."
                 st.session_state.ia_resumo_cliente = consultar_ia(p_c, "Consultor Jurídico")
                 st.session_state.fase = 2
                 st.rerun()
@@ -202,21 +210,18 @@ def main():
         if col_s.button("✅ Sim, está correto"): st.session_state.fase = 3; st.rerun()
 
     if st.session_state.fase == 3:
-        st.subheader("3. Documentos para Análise")
-        st.warning("🔒 Seus arquivos NÃO serão armazenados. Eles serão utilizados apenas para uma análise inicial da IA.")
+        st.subheader("3. Complemento e Documentos para Análise")
+        st.warning("🔒 Análise apenas em memória. Seus arquivos não serão salvos no Drive.")
         
         comp = st.text_input("Observação Adicional (Opcional):")
-        
-        # TODOS os perfis podem mandar arquivos agora
         arquivo_uploaded = st.file_uploader("Anexar Documentos para a IA ler", type=["pdf", "txt", "jpg", "png"])
+        
         if arquivo_uploaded:
             if "image" in arquivo_uploaded.type:
-                st.session_state.conteudo_arquivo = "📸 [Imagem enviada para análise visual]"
+                st.session_state.conteudo_arquivo = "📸 [Imagem enviada - Análise visual necessária]"
             else:
                 st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo_uploaded)
-        else:
-            st.session_state.conteudo_arquivo = "Nenhum arquivo enviado."
-
+        
         if st.button("🔽 Seguir para Agendamento"):
             if comp: st.session_state.dados_form["relato"] += f" [Extra: {comp}]"
             st.session_state.fase = 4
@@ -231,13 +236,26 @@ def main():
                 d = st.session_state.dados_form
                 tel_f = formatar_telefone(d['tel'])
                 
-                guia_precos = "Simples: R$350-600 | Médio: R$800-1800 | Complexo: R$2000+"
-                p_t = f"Aja como Fred Perito. Dados: {d['tecnico']}. Relato: {d['relato']}. Anexo: {st.session_state.conteudo_arquivo}. Dê a dificuldade e o valor sugerido (Mercado 2026) com base em: {guia_precos}"
+                # --- 🧠 PROMPT INTELIGENTE E PERSONALIZADO POR PERFIL 🧠 ---
+                p_t = f"""
+                AJA COMO O PERITO JUDICIAL SÊNIOR FREDERICO.
+                CONTEXTO DO CLIENTE: Perfil {d['tipo']}. Serviço: {d['servico']}.
+                DADOS BASE: {d['tecnico']}.
+                RELATO: {d['relato']}.
+                CONTEÚDO EXTRAÍDO DO ARQUIVO (ANÁLISE OBRIGATÓRIA): {st.session_state.conteudo_arquivo}.
+
+                SUA TAREFA (EXTRAIA O MÁXIMO DE DADOS, POIS O ARQUIVO SERÁ DESCARTADO):
+                1. DIFICULDADE TÉCNICA: Avalie como Baixa, Médio ou Alta. Justifique com base em riscos de impugnação.
+                2. ANÁLISE DE VALORES (MERCADO 2026):
+                   - Se Perfil for 'Advogado': Busque no texto o VALOR DA CAUSA ou VALOR DA CONDENAÇÃO. Sugira honorários entre R$ 1.500 a R$ 3.500 (ou 1% a 2% do valor da causa se for alto).
+                   - Se Perfil for 'Empresa': Foque no custo de defesa e volume de dados. Sugira R$ 1.200 a R$ 2.800.
+                   - Se Perfil for 'Colaborador': Foque em conferência simples. Sugira R$ 400 a R$ 900.
+                3. DETALHAMENTO TÉCNICO: Liste datas chaves, nomes de partes ou números de processo encontrados no arquivo para registro na planilha.
+                """
                 
                 analise_ia = consultar_ia(p_t, "Perito Judicial Sênior", 0.2)
-                status = criar_evento_agenda(service_calendar, horario, d['nome_resp'], tel_f, d['servico'])
+                status = criar_evento_agenda(service_calendar, horario, d['nome'], tel_f, d['servico'])
                 
-                # SALVA TUDO NA PLANILHA ATENDIMENTO_FRED
                 salvar_na_planilha(client_sheets, {
                     "data_hora": datetime.now().strftime("%d/%m %H:%M"),
                     "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": tel_f, "email": d['email'],
