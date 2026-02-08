@@ -26,37 +26,44 @@ SCOPES = [
 
 NOME_PLANILHA_GOOGLE = 'Atendimento_Fred' 
 
-# --- FUNÇÕES AUXILIARES DE MÁSCARA ---
+# --- 🆕 CALLBACKS PARA FORMATAÇÃO IMEDIATA ---
 
-def mascara_cnpj(val):
+def formatar_cnpj_callback():
+    val = st.session_state.cnpj_input
     limpo = re.sub(r'\D', '', str(val))
     if len(limpo) == 14:
-        return f"{limpo[:2]}.{limpo[2:5]}.{limpo[5:8]}/{limpo[8:12]}-{limpo[12:]}"
-    return limpo
+        st.session_state.cnpj_input = f"{limpo[:2]}.{limpo[2:5]}.{limpo[5:8]}/{limpo[8:12]}-{limpo[12:]}"
 
-def mascara_whatsapp(val):
-    limpo = re.sub(r'\D', '', str(val))
-    if len(limpo) == 11:
-        return f"({limpo[:2]}) {limpo[2:7]}-{limpo[7:]}"
-    elif len(limpo) == 10:
-        return f"({limpo[:2]}) {limpo[2:6]}-{limpo[6:]}"
-    return limpo
-
-def mascara_data(val):
+def formatar_data_adm_callback():
+    val = st.session_state.adm_input
     limpo = re.sub(r'\D', '', str(val))
     if len(limpo) == 8:
-        return f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
-    return limpo
+        st.session_state.adm_input = f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
 
-def mascara_moeda(val):
+def formatar_data_sai_callback():
+    val = st.session_state.sai_input
     limpo = re.sub(r'\D', '', str(val))
-    if not limpo: return ""
-    try:
-        v = float(limpo) / 100
-        return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    except: return limpo
+    if len(limpo) == 8:
+        st.session_state.sai_input = f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
 
-# --- FUNÇÕES DE SISTEMA (MANTIDAS) ---
+def formatar_salario_callback():
+    val = st.session_state.sal_input
+    if not val: return
+    temp = val.replace("R$", "").replace(".", "").replace(",", ".").strip()
+    try:
+        valor_float = float(temp)
+        st.session_state.sal_input = f"R$ {valor_float:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except: pass
+
+def formatar_tel_callback():
+    val = st.session_state.tel_input
+    limpo = re.sub(r'\D', '', str(val))
+    if len(limpo) == 11:
+        st.session_state.tel_input = f"({limpo[:2]}) {limpo[2:7]}-{limpo[7:]}"
+    elif len(limpo) == 10:
+        st.session_state.tel_input = f"({limpo[:2]}) {limpo[2:6]}-{limpo[6:]}"
+
+# --- FUNÇÕES DE SISTEMA ---
 
 def ler_conteudo_arquivo(uploaded_file):
     if uploaded_file is None: return ""
@@ -135,7 +142,8 @@ def salvar_na_planilha(client_sheets, dados):
             dados['melhor_horario'], dados['servico'], dados['analise_cliente'], dados['analise_tecnica'],
             "Processado em Memória", dados['status_agenda']
         ])
-    except: pass
+    except Exception as e:
+        st.error(f"Erro ao salvar na planilha: {e}")
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
@@ -155,57 +163,45 @@ def main():
         col1, col2 = st.columns(2)
         if tipo == "Empresa":
             nome = col1.text_input("Razão Social", value=d.get("nome", ""))
-            # MÁSCARA CNPJ DIRETA
-            cnpj_raw = col2.text_input("CNPJ (apenas números)", value=mascara_cnpj(st.session_state.get("cnpj_val", d.get("cnpj", ""))), key="cnpj_val")
-            cnpj = cnpj_raw
-            n_resp = st.text_input("Nome do Responsável", value=d.get("nome_resp", ""))
+            cnpj = col2.text_input("CNPJ (14 números)", key="cnpj_input", on_change=formatar_cnpj_callback)
+            n_resp = st.text_input("Responsável", value=d.get("nome_resp", ""))
         else:
             nome = col1.text_input("Nome Completo", value=d.get("nome", ""))
             n_resp = nome
             cnpj = ""
             
         c_tel, c_mail = st.columns(2)
-        # MÁSCARA WHATSAPP DIRETA
-        tel_raw = c_tel.text_input("WhatsApp (apenas números)", value=mascara_whatsapp(st.session_state.get("tel_val", d.get("tel", ""))), key="tel_val")
-        tel = tel_raw
+        tel = c_tel.text_input("WhatsApp", key="tel_input", on_change=formatar_tel_callback)
         mail = c_mail.text_input("E-mail", value=d.get("email", ""))
         
         opcoes_servico = ["Liquidação de Sentença", "Inicial/Estimativa", "Impugnação", "Rescisão", "Horas Extras", "Outros"] if tipo == "Advogado" else ["Rescisão", "Horas Extras", "Outros"]
-        try: serv_idx = opcoes_servico.index(d.get("servico", ""))
-        except: serv_idx = 0
-        servico = st.selectbox("Tipo de Cálculo:", opcoes_servico, index=serv_idx)
+        servico = st.selectbox("Tipo de Cálculo:", opcoes_servico)
         
         c_adm, c_sai = st.columns(2)
-        # MÁSCARA DATA ADMISSÃO DIRETA
-        adm_raw = c_adm.text_input("Admissão (DDMMYYYY)", value=mascara_data(st.session_state.get("adm_val", d.get("adm", ""))), key="adm_val")
-        adm = adm_raw
+        adm = c_adm.text_input("Admissão (DDMMYYYY)", key="adm_input", on_change=formatar_data_adm_callback)
+        sai = c_sai.text_input("Saída (DDMMYYYY)", key="sai_input", on_change=formatar_data_sai_callback)
         
-        # MÁSCARA DATA SAÍDA DIRETA
-        sai_raw = c_sai.text_input("Saída (DDMMYYYY)", value=mascara_data(st.session_state.get("sai_val", d.get("sai", ""))), key="sai_val")
-        sai = sai_raw
-        
-        # MÁSCARA SALÁRIO DIRETA
-        sal_raw = st.text_input("Salário Base (apenas números)", value=mascara_moeda(st.session_state.get("sal_val", d.get("salario", ""))), key="sal_val")
-        salario = sal_raw
+        salario = st.text_input("Salário Base", key="sal_input", on_change=formatar_salario_callback)
         
         relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""), height=100)
 
         if st.button("💬 Analisar Solicitação"):
-            if not nome or not tel: st.warning("Preencha Nome e Telefone.")
+            if not nome or not st.session_state.tel_input: st.warning("Preencha Nome e Telefone.")
             elif mail and "@" not in mail: st.error("E-mail inválido!")
             else:
                 st.session_state.dados_form.update({
-                    "nome": nome, "nome_resp": n_resp, "tel": tel, "email": mail, "cnpj": cnpj,
-                    "tipo": tipo, "servico": servico, "relato": relato, "salario": salario,
-                    "adm": adm, "sai": sai,
-                    "tecnico": f"Tipo: {servico}. Salário: {salario}. Período: {adm} a {sai}."
+                    "nome": nome, "nome_resp": n_resp, "tel": st.session_state.tel_input, "email": mail, 
+                    "cnpj": st.session_state.get("cnpj_input", ""), "tipo": tipo, "servico": servico, 
+                    "relato": relato, "salario": st.session_state.sal_input,
+                    "adm": st.session_state.adm_input, "sai": st.session_state.sai_input,
+                    "tecnico": f"Tipo: {servico}. Salário: {st.session_state.sal_input}. Período: {st.session_state.adm_input} a {st.session_state.sai_input}."
                 })
                 p_c = f"Aja como o Frederico. Entenda o relato: '{relato}'. Resuma em 1 parágrafo curto."
                 st.session_state.ia_resumo_cliente = consultar_ia(p_c, "Consultor Jurídico")
                 st.session_state.fase = 2
                 st.rerun()
 
-    # --- FASES SEGUINTES (MANTIDAS IGUAIS) ---
+    # --- FASES 2 A 5 ---
     if st.session_state.fase == 2:
         st.subheader("2. Confirmação")
         st.info(st.session_state.ia_resumo_cliente)
@@ -214,8 +210,7 @@ def main():
         if col_s.button("✅ Sim, está correto"): st.session_state.fase = 3; st.rerun()
 
     if st.session_state.fase == 3:
-        st.subheader("3. Documentos")
-        st.warning("🔒 Análise temporária. Seus arquivos não serão salvos.")
+        st.subheader("3. Complemento e Documentos")
         arquivo_uploaded = st.file_uploader("Anexar Documentos para a IA ler", type=["pdf", "txt", "jpg", "png"])
         if arquivo_uploaded:
             st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo_uploaded)
