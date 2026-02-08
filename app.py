@@ -187,34 +187,46 @@ def main():
 
     if st.session_state.fase == 1:
         st.subheader("1. Identificação e Caso")
-        tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True)
+        d = st.session_state.dados_form
+        
+        # Manutenção de dados para "Refazer"
+        perfil_index = ["Advogado", "Empresa", "Colaborador"].index(d.get("tipo", "Advogado"))
+        tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True, index=perfil_index)
+        
         col1, col2 = st.columns(2)
         if tipo == "Empresa":
-            nome = col1.text_input("Razão Social")
-            cnpj = col2.text_input("CNPJ")
-            n_resp = st.text_input("Nome Responsável")
+            nome = col1.text_input("Razão Social", value=d.get("nome", ""))
+            cnpj = col2.text_input("CNPJ", value=d.get("cnpj", ""))
+            n_resp = st.text_input("Nome Responsável", value=d.get("nome_resp", ""))
         else:
-            nome = col1.text_input("Nome Completo")
+            nome = col1.text_input("Nome Completo", value=d.get("nome", ""))
             n_resp = nome
             cnpj = ""
+            
         c_tel, c_mail = st.columns(2)
-        tel = c_tel.text_input("WhatsApp", key="tel_input", on_change=callback_formatar_telefone)
-        mail = c_mail.text_input("E-mail")
-        servico = st.selectbox("Tipo de Cálculo:", ["Liquidação de Sentença", "Inicial/Estimativa", "Impugnação", "Rescisão", "Horas Extras", "Outros"])
+        tel = c_tel.text_input("WhatsApp", value=d.get("tel", ""), key="tel_input", on_change=callback_formatar_telefone)
+        mail = c_mail.text_input("E-mail", value=d.get("email", ""))
+        
+        opcoes_servico = ["Liquidação de Sentença", "Inicial/Estimativa", "Impugnação", "Rescisão", "Horas Extras", "Outros"]
+        serv_index = opcoes_servico.index(d.get("servico", "Liquidação de Sentença"))
+        servico = st.selectbox("Tipo de Cálculo:", opcoes_servico, index=serv_index)
+        
         c_adm, c_sai = st.columns(2)
-        adm, sai = c_adm.text_input("Admissão"), c_sai.text_input("Saída")
-        salario = st.text_input("Salário Base")
-        relato = st.text_area("Resumo da Demanda:", height=100)
+        adm = c_adm.text_input("Admissão", value=d.get("adm", ""))
+        sai = c_sai.text_input("Saída", value=d.get("sai", ""))
+        salario = st.text_input("Salário Base", value=d.get("salario", ""))
+        relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""), height=100)
 
         if st.button("💬 Analisar Solicitação"):
             if not nome or not tel: st.warning("Preencha Nome e Telefone.")
             else:
                 n_tratado = formatar_nome_com_titulo(n_resp, tipo)
-                st.session_state.dados_form = {
+                st.session_state.dados_form.update({
                     "nome": nome, "nome_resp": n_resp, "tel": tel, "email": mail,
                     "cnpj": cnpj, "tipo": tipo, "servico": servico, "relato": relato,
+                    "adm": adm, "sai": sai, "salario": salario,
                     "tecnico": f"Tipo: {servico}. Salário: {salario}. Período: {adm} a {sai}."
-                }
+                })
                 p_c = f"Aja como o Frederico. O cliente {n_tratado} relatou: '{relato}'. Resuma que entendeu em 1 parágrafo curto."
                 st.session_state.ia_resumo_cliente = consultar_ia(p_c, "Consultor Jurídico")
                 st.session_state.fase = 2
@@ -230,7 +242,14 @@ def main():
     if st.session_state.fase == 3:
         st.subheader("3. Complemento e Documentos")
         comp = st.text_input("Observação Adicional (Opcional):")
-        st.session_state.arquivo_anexado = st.file_uploader("Anexar Documentos", type=["pdf", "txt", "jpg", "png"])
+        
+        # 🛡️ Trava: Apenas Advogado anexa arquivos
+        if st.session_state.dados_form["tipo"] == "Advogado":
+            st.session_state.arquivo_anexado = st.file_uploader("Anexar Documentos", type=["pdf", "txt", "jpg", "png"])
+        else:
+            st.info("ℹ️ Perfil restrito: Apenas Advogados podem anexar arquivos.")
+            st.session_state.arquivo_anexado = None
+
         if st.button("🔽 Seguir para Agendamento"):
             if comp: st.session_state.dados_form["relato"] += f" [Extra: {comp}]"
             if st.session_state.arquivo_anexado:
@@ -248,15 +267,35 @@ def main():
         opcoes = buscar_horarios_livres(service_calendar) if service_calendar else ["Erro Agenda"]
         horario = st.selectbox("Escolha o Horário:", opcoes)
         if st.button("✅ Confirmar Agendamento"):
-            with st.spinner("Finalizando..."):
+            with st.spinner("IA analisando complexidade e valores..."):
                 d = st.session_state.dados_form
                 tel_f = formatar_telefone(d['tel'])
-                p_t = f"Análise técnica: {d['tecnico']}. Relato: {d['relato']}. Anexo: {st.session_state.conteudo_arquivo}. Analise riscos."
+                
+                # Prompt com lógica de honorários e dificuldade
+                guia_precos = """
+                TABELA DE REFERÊNCIA (Mercado 2026):
+                - Simples (Rescisórios): R$ 350 a R$ 600.
+                - Médios (Horas Extras/Insalubridade): R$ 800 a R$ 1.800.
+                - Complexos (Liquidação/Perícia): R$ 2.000+ ou 1% a 3% da causa.
+                """
+                
+                p_t = f"""
+                AJA COMO O PERITO FREDERICO.
+                Dados: {d['tecnico']}. Relato: {d['relato']}. Conteúdo Anexo: {st.session_state.conteudo_arquivo}.
+                
+                TAREFA:
+                1. Analise riscos técnicos.
+                2. Aponte a DIFICULDADE do cálculo (Baixa, Média ou Alta) e justifique.
+                3. Estipule um VALOR ESTIMADO de honorários seguindo este guia:
+                {guia_precos}
+                """
+                
                 analise = consultar_ia(p_t, "Perito Judicial Sênior", 0.2)
                 status = criar_evento_agenda(service_calendar, horario, d['nome_resp'], tel_f, d['servico'])
                 link = "Sem anexo"
                 if d.get("nome_arquivo") != "Nenhum":
                     link = criar_pasta_cliente(service_drive, d['nome'], d['servico'], st.session_state.arquivo_anexado)
+                
                 salvar_na_planilha(client_sheets, {
                     "data_hora": datetime.now().strftime("%d/%m %H:%M"),
                     "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": tel_f, "email": d['email'],
@@ -264,6 +303,7 @@ def main():
                     "analise_cliente": st.session_state.ia_resumo_cliente, "analise_tecnica": analise,
                     "status_agenda": status
                 }, link)
+                
                 st.session_state.mensagem_final = f"✅ **Confirmado!** {d['nome']}, agendamos para {horario}."
                 st.session_state.fase = 5
                 st.rerun()
@@ -271,7 +311,7 @@ def main():
     if st.session_state.fase == 5:
         st.balloons(); st.success(st.session_state.mensagem_final)
         col_v, col_e = st.columns(2)
-        if col_v.button("🔄 Novo"): st.session_state.clear(); st.rerun()
+        if col_v.button("🔄 Novo Atendimento"): st.session_state.clear(); st.rerun()
         if col_e.button("🏁 Sair"): st.session_state.encerrado = True; st.rerun()
 
 if __name__ == "__main__":
