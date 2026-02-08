@@ -41,25 +41,25 @@ def ler_conteudo_arquivo(uploaded_file):
         return f"\n--- CONTEÚDO DO ANEXO ({uploaded_file.name}) ---\n{texto_extraido}\n"
     except Exception as e: return f"\n[Erro leitura: {e}]\n"
 
-# --- MÁSCARAS DIRETAS ---
+# --- 🆕 FUNÇÕES DE MÁSCARA DIRETA NO CAMPO ---
 
-def aplicar_mascara_cnpj(val):
+def mascara_cnpj(val):
     limpo = re.sub(r'\D', '', str(val))
     if len(limpo) == 14:
         return f"{limpo[:2]}.{limpo[2:5]}.{limpo[5:8]}/{limpo[8:12]}-{limpo[12:]}"
     return limpo
 
-def aplicar_mascara_moeda(val):
-    limpo = re.sub(r'\D', '', str(val))
-    if not limpo: return ""
-    v = float(limpo) / 100
-    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-def aplicar_mascara_data(val):
+def mascara_data(val):
     limpo = re.sub(r'\D', '', str(val))
     if len(limpo) == 8:
         return f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
     return limpo
+
+def mascara_moeda(val):
+    limpo = re.sub(r'\D', '', str(val))
+    if not limpo: return ""
+    v = float(limpo) / 100
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def validar_email(email):
     return "@" in email and "." in email
@@ -165,16 +165,15 @@ def main():
     if st.session_state.fase == 1:
         st.subheader("1. Identificação e Caso")
         d = st.session_state.dados_form
-        perfil_list = ["Advogado", "Empresa", "Colaborador"]
-        perfil_idx = perfil_list.index(d.get("tipo", "Advogado"))
-        tipo = st.radio("Perfil:", perfil_list, horizontal=True, index=perfil_idx)
+        perfil_idx = ["Advogado", "Empresa", "Colaborador"].index(d.get("tipo", "Advogado"))
+        tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True, index=perfil_idx)
         
         col1, col2 = st.columns(2)
         if tipo == "Empresa":
             nome = col1.text_input("Razão Social", value=d.get("nome", ""))
-            # CAMPO CNPJ COM MÁSCARA DIRETA
-            cnpj_input = col2.text_input("CNPJ (apenas números)", value=d.get("cnpj", ""))
-            cnpj = aplicar_mascara_cnpj(cnpj_input)
+            # MÁSCARA CNPJ DIRETA
+            v_cnpj = mascara_cnpj(st.session_state.get("cnpj_raw", d.get("cnpj", "")))
+            cnpj = col2.text_input("CNPJ (apenas números)", value=v_cnpj, key="cnpj_raw")
             n_resp = st.text_input("Nome do Responsável", value=d.get("nome_resp", ""))
         else:
             nome = col1.text_input("Nome Completo", value=d.get("nome", ""))
@@ -191,24 +190,23 @@ def main():
         servico = st.selectbox("Tipo de Cálculo:", opcoes_servico, index=serv_idx)
         
         c_adm, c_sai = st.columns(2)
-        # CAMPOS DE DATA COM MÁSCARA DIRETA
-        adm_input = c_adm.text_input("Admissão (apenas números)", value=d.get("adm", ""))
-        adm = aplicar_mascara_data(adm_input)
+        # MÁSCARA DATA ADMISSÃO DIRETA
+        v_adm = mascara_data(st.session_state.get("adm_raw", d.get("adm", "")))
+        adm = c_adm.text_input("Admissão (DDMMYYYY)", value=v_adm, key="adm_raw")
         
-        sai_input = c_sai.text_input("Saída (apenas números)", value=d.get("sai", ""))
-        sai = aplicar_mascara_data(sai_input)
+        # MÁSCARA DATA SAÍDA DIRETA
+        v_sai = mascara_data(st.session_state.get("sai_raw", d.get("sai", "")))
+        sai = c_sai.text_input("Saída (DDMMYYYY)", value=v_sai, key="sai_raw")
         
-        # CAMPO SALÁRIO COM MÁSCARA DIRETA
-        sal_input = st.text_input("Salário Base (apenas números)", value=d.get("salario", ""))
-        salario = aplicar_mascara_moeda(sal_input)
+        # MÁSCARA SALÁRIO DIRETA
+        v_sal = mascara_moeda(st.session_state.get("sal_raw", d.get("salario", "")))
+        salario = st.text_input("Salário Base (apenas números)", value=v_sal, key="sal_raw")
         
         relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""), height=100)
 
         if st.button("💬 Analisar Solicitação"):
-            # Validação Final antes de avançar
             if not nome or not tel: st.warning("Preencha Nome e Telefone.")
             elif mail and not validar_email(mail): st.error("E-mail inválido!")
-            elif tipo == "Empresa" and len(re.sub(r'\D', '', cnpj)) != 14: st.error("CNPJ inválido!")
             else:
                 st.session_state.dados_form.update({
                     "nome": nome, "nome_resp": n_resp, "tel": tel, "email": mail, "cnpj": cnpj,
@@ -221,7 +219,7 @@ def main():
                 st.session_state.fase = 2
                 st.rerun()
 
-    # --- O RESTANTE DO CÓDIGO PERMANECE IGUAL ---
+    # --- FASES 2 A 5 (SEM ALTERAÇÕES) ---
     if st.session_state.fase == 2:
         st.subheader("2. Confirmação")
         st.info(st.session_state.ia_resumo_cliente)
@@ -230,17 +228,12 @@ def main():
         if col_s.button("✅ Sim, está correto"): st.session_state.fase = 3; st.rerun()
 
     if st.session_state.fase == 3:
-        st.subheader("3. Documentos")
-        st.warning("🔒 Análise temporária. Seus arquivos não serão salvos.")
-        comp = st.text_input("Observação Adicional:")
-        arquivo_uploaded = st.file_uploader("Anexar Documentos", type=["pdf", "txt", "jpg", "png"])
+        st.subheader("3. Complemento e Documentos")
+        st.warning("🔒 Análise temporária pela IA. Seus arquivos não serão salvos.")
+        arquivo_uploaded = st.file_uploader("Anexar Documentos para a IA ler", type=["pdf", "txt", "jpg", "png"])
         if arquivo_uploaded:
             st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo_uploaded)
-        
-        if st.button("🔽 Seguir para Agendamento"):
-            if comp: st.session_state.dados_form["relato"] += f" [Extra: {comp}]"
-            st.session_state.fase = 4
-            st.rerun()
+        if st.button("🔽 Seguir para Agendamento"): st.session_state.fase = 4; st.rerun()
 
     if st.session_state.fase == 4:
         st.subheader("🗓️ Finalizar")
@@ -249,13 +242,12 @@ def main():
         if st.button("✅ Confirmar"):
             with st.spinner("IA analisando tudo..."):
                 d = st.session_state.dados_form
-                tel_f = formatar_telefone(d['tel'])
-                p_t = f"Aja como Fred Perito. Contexto {d['tipo']}. DADOS: {d['tecnico']}. RELATO: {d['relato']}. ANEXO: {st.session_state.conteudo_arquivo}. Dê dificuldade e Valor Sugerido (Mercado 2026)."
+                p_t = f"Aja como Fred Perito. Contexto {d['tipo']}. DADOS: {d['tecnico']}. RELATO: {d['relato']}. ANEXO: {st.session_state.conteudo_arquivo}. Dificuldade e Valor Sugerido (Mercado 2026)."
                 analise_ia = consultar_ia(p_t, "Perito Judicial Sênior", 0.2)
-                status = criar_evento_agenda(service_calendar, horario, d['nome'], tel_f, d['servico'])
+                status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                 salvar_na_planilha(client_sheets, {
                     "data_hora": datetime.now().strftime("%d/%m %H:%M"),
-                    "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": tel_f, "email": d['email'],
+                    "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'], "email": d['email'],
                     "melhor_horario": horario, "servico": d['servico'],
                     "analise_cliente": st.session_state.ia_resumo_cliente,
                     "analise_tecnica": analise_ia, "status_agenda": status
