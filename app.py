@@ -154,11 +154,20 @@ def criar_pasta_cliente(service_drive, nome_cliente, nome_servico, arquivo_uploa
         folder = service_drive.files().create(body=meta, fields='id, webViewLink').execute()
         folder_id = folder.get('id')
 
-        # 3. Faz o upload do arquivo real (Se houver) 📤
-        if arquivo_uploaded is not None:
-            media = MediaIoBaseUpload(arquivo_uploaded, mimetype=arquivo_uploaded.type, resumable=True)
-            file_meta = {'name': arquivo_uploaded.name, 'parents': [folder_id]}
-            service_drive.files().create(body=file_meta, media_body=media, fields='id').execute()
+     # 3. Faz o upload do arquivo real (Se houver) 📤
+     if arquivo_uploaded is not None:
+        media = MediaIoBaseUpload(arquivo_uploaded, mimetype=arquivo_uploaded.type, resumable=True)
+        file_meta = {
+            'name': arquivo_uploaded.name, 
+          'parents': [folder_id] # Aqui garantimos que ele nasça dentro da pasta do cliente
+    }
+    # Adicionamos 'supportsAllDrives=True' para evitar conflitos de permissão
+    service_drive.files().create(
+        body=file_meta, 
+        media_body=media, 
+        fields='id',
+        supportsAllDrives=True 
+    ).execute()
         
         # 4. Define permissões
         service_drive.permissions().create(fileId=folder_id, body={'type': 'anyone', 'role': 'writer'}).execute()
@@ -415,5 +424,6 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
