@@ -134,11 +134,11 @@ def salvar_na_planilha(client_sheets, dados):
     try:
         sheet = client_sheets.open(NOME_PLANILHA_GOOGLE).sheet1
         if not sheet.get_all_values(): 
-            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Email", "Horário", "Serviço", "Resumo Cliente", "Análise Técnica", "Link Pasta", "Status"])
+            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Email", "Horário", "Serviço", "Resumo Cliente", "Análise Técnica", "Status Arquivo", "Status"])
         sheet.append_row([
             dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], dados['email'],
             dados['melhor_horario'], dados['servico'], dados['analise_cliente'], dados['analise_tecnica'],
-            "Não armazenado", dados['status_agenda']
+            "Processado em Memória (Não Salvo)", dados['status_agenda']
         ])
     except: pass
 
@@ -160,7 +160,6 @@ def main():
     if 'dados_form' not in st.session_state: st.session_state.dados_form = {}
     if 'conteudo_arquivo' not in st.session_state: st.session_state.conteudo_arquivo = ""
 
-    # Conectamos apenas ao Sheets e Calendar, removendo Drive
     client_sheets, service_calendar = conectar_google()
 
     if st.session_state.fase == 1:
@@ -230,15 +229,14 @@ def main():
         
         comp = st.text_input("Observação Adicional (Opcional):")
         
-        if st.session_state.dados_form.get("tipo") == "Advogado":
-            arquivo_uploaded = st.file_uploader("Anexar Documentos", type=["pdf", "txt", "jpg", "png"])
-            if arquivo_uploaded:
-                if "image" in arquivo_uploaded.type:
-                    st.session_state.conteudo_arquivo = "📸 [Imagem enviada - Análise visual necessária]"
-                else:
-                    st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo_uploaded)
+        # REMOVIDA A RESTRIÇÃO: Agora todos podem enviar arquivos
+        arquivo_uploaded = st.file_uploader("Anexar Documentos para a IA ler", type=["pdf", "txt", "jpg", "png"])
+        if arquivo_uploaded:
+            if "image" in arquivo_uploaded.type:
+                st.session_state.conteudo_arquivo = "📸 [Imagem enviada - Análise visual necessária pela IA]"
+            else:
+                st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo_uploaded)
         else:
-            st.info("ℹ️ Perfil restrito: Apenas Advogados podem anexar arquivos.")
             st.session_state.conteudo_arquivo = "Nenhum arquivo enviado."
 
         if st.button("🔽 Seguir para Agendamento"):
