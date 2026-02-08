@@ -66,14 +66,24 @@ def formatar_tel_callback():
 
 # --- FUNÇÕES DE SISTEMA ---
 
+# 🛡️ CAMADA DE SEGURANÇA: Verificação de tipo e extração de texto
 def ler_conteudo_arquivo(uploaded_file):
     if uploaded_file is None: return ""
     try:
+        # Bloqueio de Imagens (OCR não suportado nativamente por PyPDF2)
+        if uploaded_file.type in ["image/png", "image/jpeg", "image/jpg"]:
+            return "[AVISO: O sistema não lê texto de imagens automaticamente. Por favor, detalhe os dados no resumo técnico.]"
+            
         if uploaded_file.type == "application/pdf":
             leitor = PyPDF2.PdfReader(uploaded_file)
-            return "\n".join([p.extract_text() for p in leitor.pages])
+            texto = "\n".join([p.extract_text() for p in leitor.pages if p.extract_text()])
+            # Alerta para PDF sem texto (ex: escaneado como imagem)
+            if not texto.strip():
+                return "[AVISO: Este PDF parece ser uma imagem/digitalização sem texto extraível. Descreva os dados importantes no relato.]"
+            return texto
+            
         return str(uploaded_file.read(), "utf-8")
-    except: return "[Erro na leitura do arquivo]"
+    except: return "[Erro na leitura técnica do arquivo]"
 
 def conectar_google():
     try:
@@ -184,8 +194,17 @@ def main():
 
     if st.session_state.fase == 3:
         st.subheader("3. Documentos")
-        arquivo = st.file_uploader("Anexar PDF/TXT")
-        if arquivo: st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo)
+        # 🛡️ Suporte visual para avisar tipos de arquivos aceitos
+        arquivo = st.file_uploader("Anexar Documento (PDF ou TXT)", type=["pdf", "txt", "jpg", "png"])
+        if arquivo: 
+            # Processa o arquivo aplicando a camada de segurança
+            conteudo = ler_conteudo_arquivo(arquivo)
+            st.session_state.conteudo_arquivo = conteudo
+            if "[AVISO" in conteudo:
+                st.warning(conteudo)
+            else:
+                st.success("Conteúdo do arquivo processado com sucesso.")
+        
         if st.button("🔽 Ir para Agendamento"): st.session_state.fase = 4; st.rerun()
 
     if st.session_state.fase == 4:
@@ -196,11 +215,11 @@ def main():
         if st.button("✅ Confirmar Tudo"):
             with st.spinner("Gravando dados..."):
                 d = st.session_state.dados_form
-                p_t = f"Perfil {d['tipo']}. Cálculo de {d['servico']}. Salário {d['salario']}. Relato: {d['relato']}. Dê valor sugerido e dificuldade."
+                # 🛡️ IA Validada: Envia o conteúdo do arquivo (mesmo se for aviso de erro) para contexto
+                p_t = f"Perfil {d['tipo']}. Cálculo de {d['servico']}. Salário {d['salario']}. Relato: {d['relato']}. CONTEÚDO DO ARQUIVO: {st.session_state.get('conteudo_arquivo', 'Não enviado')}. Dê valor sugerido e dificuldade técnica."
                 analise_ia = consultar_ia(p_t, "Perito Judicial")
                 status_agenda = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                 
-                # O Parecer é salvo na planilha mas NÃO é exibido na tela final
                 sucesso = salvar_na_planilha(client_sheets, {
                     "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'], "email": d['email'],
                     "melhor_horario": horario, "servico": d['servico'], "analise_cliente": st.session_state.ia_resumo_cliente, "analise_tecnica": analise_ia, "status_agenda": status_agenda
