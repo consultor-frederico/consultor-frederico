@@ -1,5 +1,6 @@
 import streamlit as st
 import datetime
+import json  # 📂 Essencial para ler os Secrets do Streamlit
 import random
 import requests
 import gspread
@@ -8,6 +9,7 @@ import PyPDF2
 from io import BytesIO
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload  # 📤 Essencial para enviar arquivos ao Drive
 from datetime import datetime, timedelta
 
 # --- 🚨 SUAS CONFIGURAÇÕES 🚨 ---
@@ -90,10 +92,18 @@ def formatar_nome_com_titulo(nome, perfil):
 
 def conectar_google():
     try:
-        creds = Credentials.from_service_account_file(ARQUIVO_CREDENCIAIS, scopes=SCOPES)
+        # 1. Tenta ler do painel de Secrets do Streamlit (Para o Deploy)
+        if "google_credentials" in st.secrets:
+            info_json = st.secrets["google_credentials"]["json_data"]
+            info_chaves = json.loads(info_json)
+            creds = Credentials.from_service_account_info(info_chaves, scopes=SCOPES)
+        else:
+            # 2. Caso você esteja testando no seu computador (Local)
+            creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
+            
         return gspread.authorize(creds), build('drive', 'v3', credentials=creds), build('calendar', 'v3', credentials=creds)
     except Exception as e:
-        st.error(f"❌ Erro Google: {e}")
+        st.error(f"❌ Erro de Conexão: {e}")
         return None, None, None
 
 def consultar_ia(mensagem, sistema, temperatura=0.5):
@@ -129,17 +139,35 @@ def buscar_horarios_livres(service_calendar):
         dia_foco += timedelta(days=1)
     return sugestoes[:10]
 
-def criar_pasta_cliente(service_drive, nome_cliente, nome_servico):
+def criar_pasta_cliente(service_drive, nome_cliente, nome_servico, arquivo_uploaded):
     try:
+        # 1. Localiza a pasta pai
         query = f"name = '{NOME_PASTA_DRIVE_PAI}' and mimeType = 'application/vnd.google-apps.folder'"
         results = service_drive.files().list(q=query, fields="files(id)").execute()
         parent_id = results.get('files', [])[0]['id'] if results.get('files') else None
-        meta = {'name': f"{datetime.now().strftime('%Y-%m-%d')} - {nome_cliente} - {nome_servico}", 'mimeType': 'application/vnd.google-apps.folder'}
+        
+        # 2. Cria a nova pasta do cliente
+        meta = {
+            'name': f"{datetime.now().strftime('%Y-%m-%d')} - {nome_cliente} - {nome_servico}", 
+            'mimeType': 'application/vnd.google-apps.folder'
+        }
         if parent_id: meta['parents'] = [parent_id]
+        
         folder = service_drive.files().create(body=meta, fields='id, webViewLink').execute()
-        service_drive.permissions().create(fileId=folder.get('id'), body={'type': 'anyone', 'role': 'writer'}).execute()
+        folder_id = folder.get('id')
+
+        # 3. Faz o upload do arquivo real (Se houver) 📤
+        if arquivo_uploaded is not None:
+            media = MediaIoBaseUpload(arquivo_uploaded, mimetype=arquivo_uploaded.type, resumable=True)
+            file_meta = {'name': arquivo_uploaded.name, 'parents': [folder_id]}
+            service_drive.files().create(body=file_meta, media_body=media, fields='id').execute()
+        
+        # 4. Define permissões
+        service_drive.permissions().create(fileId=folder_id, body={'type': 'anyone', 'role': 'writer'}).execute()
+        
         return folder.get('webViewLink')
-    except Exception as e: return f"Erro: {e}"
+    except Exception as e:
+        return f"Erro no Drive: {e}"
 
 def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
     try:
@@ -274,21 +302,34 @@ def main():
             st.session_state.fase = 3
             st.rerun()
 
-    # --- FASE 3: COMPLEMENTO ---
+# --- FASE 3: COMPLEMENTO ---
     if st.session_state.fase == 3:
         st.subheader("3. Complemento e Documentos")
-        st.markdown("Deseja adicionar alguma informação extra ou anexar documentos (Sentença, TRCT, etc)?")
+        st.markdown("Deseja adicionar alguma informação extra ou anexar documentos (Sentença, TRCT, fotos, etc)?")
         
         complemento = st.text_input("Observação Adicional (Opcional):")
-        arquivo = st.file_uploader("Anexar PDF ou TXT (Opcional)", type=["pdf", "txt"])
+        
+        # 1. Guardamos o arquivo na memória da sessão e permitimos imagens
+        st.session_state.arquivo_anexado = st.file_uploader(
+            "Anexar PDF, TXT ou Imagem (Opcional)", 
+            type=["pdf", "txt", "jpg", "jpeg", "png"]
+        )
         
         if st.button("🔽 Seguir para Agendamento"):
             if complemento:
                 st.session_state.dados_form["relato"] += f" [Obs Extra: {complemento}]"
             
-            if arquivo:
-                st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo)
-                st.session_state.dados_form["nome_arquivo"] = arquivo.name
+            # 2. Verificamos se existe um arquivo na memória
+            if st.session_state.arquivo_anexado:
+                tipo = st.session_state.arquivo_anexado.type
+                
+                # Se for imagem, avisamos a IA que é um anexo visual 📸
+                if "image" in tipo:
+                    st.session_state.conteudo_arquivo = "📸 [O usuário enviou uma imagem/foto. Verifique o anexo no Google Drive para detalhes visuais.]"
+                else:
+                    st.session_state.conteudo_arquivo = ler_conteudo_arquivo(st.session_state.arquivo_anexado)
+                
+                st.session_state.dados_form["nome_arquivo"] = st.session_state.arquivo_anexado.name
             else:
                 st.session_state.dados_form["nome_arquivo"] = "Nenhum"
                 
@@ -306,19 +347,23 @@ def main():
                 d = st.session_state.dados_form
                 tel_formatado = formatar_telefone(d['tel'])
                 
+                # 3. O prompt agora leva o aviso sobre a imagem se houver
                 prompt_tecnico = f"""
                 AJA COMO O PERITO FREDERICO. Análise Técnica para uso interno.
                 Dados: {d['tecnico']}. Relato Cliente: {d['relato']}.
                 Conteúdo Documento Anexo: {st.session_state.conteudo_arquivo}.
-                TAREFA: Analise friamente os riscos, as verbas devidas, reflexos e pontos de atenção técnica.
+                TAREFA: Analise friamente os riscos e verbas. Se houver aviso de imagem, mencione a necessidade de conferência visual manual.
                 """
                 analise_tecnica_final = consultar_ia(prompt_tecnico, "Perito Judicial Sênior", temperatura=0.2)
 
                 status = criar_evento_agenda(service_calendar, horario, d['nome_resp'], tel_formatado, d['servico'])
                 
+                # 4. Pegamos o arquivo da "gaveta" para fazer o upload real no Drive
                 link_pasta = "Sem anexo"
+                arquivo_para_drive = st.session_state.get("arquivo_anexado")
+                
                 if d.get("nome_arquivo") != "Nenhum":
-                    link_pasta = criar_pasta_cliente(service_drive, d['nome'], d['servico'])
+                    link_pasta = criar_pasta_cliente(service_drive, d['nome'], d['servico'], arquivo_para_drive)
 
                 dados_finais = {
                     "data_hora": datetime.now().strftime("%d/%m %H:%M"),
@@ -330,14 +375,13 @@ def main():
                 }
                 salvar_na_planilha(client_sheets, dados_finais, link_pasta)
                 
-                # PREPARA A MENSAGEM E MUDA DE FASE
                 st.session_state.mensagem_final = f"""
                 ✅ **Agendamento Confirmado!**
                 Muito obrigado pelo contato, {d['nome']}.
                 O Consultor Frederico entrará em contato com você exatamente no dia **{horario}** para tratar do seu caso de **{d['servico']}**.
                 Prepare seus documentos e até lá!
                 """
-                st.session_state.fase = 5  # <--- O PULO DO GATO: MUDAMOS PARA UMA FASE FINAL
+                st.session_state.fase = 5
                 st.rerun()
 
     # --- FASE 5: TELA DE SUCESSO E DECISÃO ---
@@ -358,4 +402,5 @@ def main():
             st.rerun()
 
 if __name__ == "__main__":
+
     main()
