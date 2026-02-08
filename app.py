@@ -26,7 +26,37 @@ SCOPES = [
 
 NOME_PLANILHA_GOOGLE = 'Atendimento_Fred' 
 
-# --- FUNÇÕES AUXILIARES ---
+# --- FUNÇÕES AUXILIARES DE MÁSCARA ---
+
+def mascara_cnpj(val):
+    limpo = re.sub(r'\D', '', str(val))
+    if len(limpo) == 14:
+        return f"{limpo[:2]}.{limpo[2:5]}.{limpo[5:8]}/{limpo[8:12]}-{limpo[12:]}"
+    return limpo
+
+def mascara_whatsapp(val):
+    limpo = re.sub(r'\D', '', str(val))
+    if len(limpo) == 11:
+        return f"({limpo[:2]}) {limpo[2:7]}-{limpo[7:]}"
+    elif len(limpo) == 10:
+        return f"({limpo[:2]}) {limpo[2:6]}-{limpo[6:]}"
+    return limpo
+
+def mascara_data(val):
+    limpo = re.sub(r'\D', '', str(val))
+    if len(limpo) == 8:
+        return f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
+    return limpo
+
+def mascara_moeda(val):
+    limpo = re.sub(r'\D', '', str(val))
+    if not limpo: return ""
+    try:
+        v = float(limpo) / 100
+        return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except: return limpo
+
+# --- FUNÇÕES DE SISTEMA (MANTIDAS) ---
 
 def ler_conteudo_arquivo(uploaded_file):
     if uploaded_file is None: return ""
@@ -40,52 +70,6 @@ def ler_conteudo_arquivo(uploaded_file):
             texto_extraido = str(uploaded_file.read(), "utf-8")
         return f"\n--- CONTEÚDO DO ANEXO ({uploaded_file.name}) ---\n{texto_extraido}\n"
     except Exception as e: return f"\n[Erro leitura: {e}]\n"
-
-# --- 🆕 FUNÇÕES DE MÁSCARA DIRETA NO CAMPO ---
-
-def mascara_cnpj(val):
-    limpo = re.sub(r'\D', '', str(val))
-    if len(limpo) == 14:
-        return f"{limpo[:2]}.{limpo[2:5]}.{limpo[5:8]}/{limpo[8:12]}-{limpo[12:]}"
-    return limpo
-
-def mascara_data(val):
-    limpo = re.sub(r'\D', '', str(val))
-    if len(limpo) == 8:
-        return f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
-    return limpo
-
-def mascara_moeda(val):
-    limpo = re.sub(r'\D', '', str(val))
-    if not limpo: return ""
-    v = float(limpo) / 100
-    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-def validar_email(email):
-    return "@" in email and "." in email
-
-def callback_formatar_telefone():
-    val = st.session_state.tel_input
-    if not val: return
-    limpo = re.sub(r'\D', '', str(val))
-    if len(limpo) == 11:
-        st.session_state.tel_input = f"({limpo[:2]}) {limpo[2:7]}-{limpo[7:]}"
-    elif len(limpo) == 10:
-        st.session_state.tel_input = f"({limpo[:2]}) {limpo[2:6]}-{limpo[6:]}"
-
-def formatar_telefone(val):
-    if not val: return ""
-    limpo = re.sub(r'\D', '', str(val))
-    if len(limpo) == 11: return f"({limpo[:2]}) {limpo[2:7]}-{limpo[7:]}"
-    elif len(limpo) == 10: return f"({limpo[:2]}) {limpo[2:6]}-{limpo[6:]}"
-    return val
-
-def formatar_nome_com_titulo(nome, perfil):
-    if not nome: return ""
-    p_nome = nome.split()[0].title()
-    genero_fem = p_nome[-1].lower() == 'a'
-    titulo = "Dra." if (perfil == 'Advogado' and genero_fem) else "Dr." if perfil == 'Advogado' else "Sra." if genero_fem else "Sr."
-    return f"{titulo} {p_nome}"
 
 def conectar_google():
     try:
@@ -119,7 +103,6 @@ def buscar_horarios_livres(service_calendar):
         fim = dia_foco.replace(hour=23, minute=59, second=59).isoformat() + 'Z'
         events_result = service_calendar.events().list(calendarId=ID_AGENDA, timeMin=comeco, timeMax=fim, singleEvents=True).execute()
         horas_ocupadas = [int(e['start'].get('dateTime').split('T')[1].split(':')[0]) for e in events_result.get('items', []) if e['start'].get('dateTime')]
-        
         dia_txt = f"{dia_foco.strftime('%d/%m')} ({['Seg','Ter','Qua','Qui','Sex'][dia_foco.weekday()]})"
         for h in [9, 10, 11, 13, 14, 15, 16, 17]:
             if h not in horas_ocupadas: sugestoes.append(f"{dia_txt} às {h}:00")
@@ -165,15 +148,16 @@ def main():
     if st.session_state.fase == 1:
         st.subheader("1. Identificação e Caso")
         d = st.session_state.dados_form
-        perfil_idx = ["Advogado", "Empresa", "Colaborador"].index(d.get("tipo", "Advogado"))
-        tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True, index=perfil_idx)
+        perfil_list = ["Advogado", "Empresa", "Colaborador"]
+        perfil_idx = perfil_list.index(d.get("tipo", "Advogado"))
+        tipo = st.radio("Perfil:", perfil_list, horizontal=True, index=perfil_idx)
         
         col1, col2 = st.columns(2)
         if tipo == "Empresa":
             nome = col1.text_input("Razão Social", value=d.get("nome", ""))
             # MÁSCARA CNPJ DIRETA
-            v_cnpj = mascara_cnpj(st.session_state.get("cnpj_raw", d.get("cnpj", "")))
-            cnpj = col2.text_input("CNPJ (apenas números)", value=v_cnpj, key="cnpj_raw")
+            cnpj_raw = col2.text_input("CNPJ (apenas números)", value=mascara_cnpj(st.session_state.get("cnpj_val", d.get("cnpj", ""))), key="cnpj_val")
+            cnpj = cnpj_raw
             n_resp = st.text_input("Nome do Responsável", value=d.get("nome_resp", ""))
         else:
             nome = col1.text_input("Nome Completo", value=d.get("nome", ""))
@@ -181,7 +165,9 @@ def main():
             cnpj = ""
             
         c_tel, c_mail = st.columns(2)
-        tel = c_tel.text_input("WhatsApp", value=d.get("tel", ""), key="tel_input", on_change=callback_formatar_telefone)
+        # MÁSCARA WHATSAPP DIRETA
+        tel_raw = c_tel.text_input("WhatsApp (apenas números)", value=mascara_whatsapp(st.session_state.get("tel_val", d.get("tel", ""))), key="tel_val")
+        tel = tel_raw
         mail = c_mail.text_input("E-mail", value=d.get("email", ""))
         
         opcoes_servico = ["Liquidação de Sentença", "Inicial/Estimativa", "Impugnação", "Rescisão", "Horas Extras", "Outros"] if tipo == "Advogado" else ["Rescisão", "Horas Extras", "Outros"]
@@ -191,22 +177,22 @@ def main():
         
         c_adm, c_sai = st.columns(2)
         # MÁSCARA DATA ADMISSÃO DIRETA
-        v_adm = mascara_data(st.session_state.get("adm_raw", d.get("adm", "")))
-        adm = c_adm.text_input("Admissão (DDMMYYYY)", value=v_adm, key="adm_raw")
+        adm_raw = c_adm.text_input("Admissão (DDMMYYYY)", value=mascara_data(st.session_state.get("adm_val", d.get("adm", ""))), key="adm_val")
+        adm = adm_raw
         
         # MÁSCARA DATA SAÍDA DIRETA
-        v_sai = mascara_data(st.session_state.get("sai_raw", d.get("sai", "")))
-        sai = c_sai.text_input("Saída (DDMMYYYY)", value=v_sai, key="sai_raw")
+        sai_raw = c_sai.text_input("Saída (DDMMYYYY)", value=mascara_data(st.session_state.get("sai_val", d.get("sai", ""))), key="sai_val")
+        sai = sai_raw
         
         # MÁSCARA SALÁRIO DIRETA
-        v_sal = mascara_moeda(st.session_state.get("sal_raw", d.get("salario", "")))
-        salario = st.text_input("Salário Base (apenas números)", value=v_sal, key="sal_raw")
+        sal_raw = st.text_input("Salário Base (apenas números)", value=mascara_moeda(st.session_state.get("sal_val", d.get("salario", ""))), key="sal_val")
+        salario = sal_raw
         
         relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""), height=100)
 
         if st.button("💬 Analisar Solicitação"):
             if not nome or not tel: st.warning("Preencha Nome e Telefone.")
-            elif mail and not validar_email(mail): st.error("E-mail inválido!")
+            elif mail and "@" not in mail: st.error("E-mail inválido!")
             else:
                 st.session_state.dados_form.update({
                     "nome": nome, "nome_resp": n_resp, "tel": tel, "email": mail, "cnpj": cnpj,
@@ -219,7 +205,7 @@ def main():
                 st.session_state.fase = 2
                 st.rerun()
 
-    # --- FASES 2 A 5 (SEM ALTERAÇÕES) ---
+    # --- FASES SEGUINTES (MANTIDAS IGUAIS) ---
     if st.session_state.fase == 2:
         st.subheader("2. Confirmação")
         st.info(st.session_state.ia_resumo_cliente)
@@ -228,8 +214,8 @@ def main():
         if col_s.button("✅ Sim, está correto"): st.session_state.fase = 3; st.rerun()
 
     if st.session_state.fase == 3:
-        st.subheader("3. Complemento e Documentos")
-        st.warning("🔒 Análise temporária pela IA. Seus arquivos não serão salvos.")
+        st.subheader("3. Documentos")
+        st.warning("🔒 Análise temporária. Seus arquivos não serão salvos.")
         arquivo_uploaded = st.file_uploader("Anexar Documentos para a IA ler", type=["pdf", "txt", "jpg", "png"])
         if arquivo_uploaded:
             st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo_uploaded)
@@ -242,7 +228,9 @@ def main():
         if st.button("✅ Confirmar"):
             with st.spinner("IA analisando tudo..."):
                 d = st.session_state.dados_form
-                p_t = f"Aja como Fred Perito. Contexto {d['tipo']}. DADOS: {d['tecnico']}. RELATO: {d['relato']}. ANEXO: {st.session_state.conteudo_arquivo}. Dificuldade e Valor Sugerido (Mercado 2026)."
+                p_t = f"""AJA COMO O PERITO JUDICIAL FREDERICO. Perfil {d['tipo']}.
+                DADOS: {d['tecnico']}. RELATO: {d['relato']}. ANEXO: {st.session_state.conteudo_arquivo}.
+                Dê a Dificuldade e Valor Sugerido (Mercado 2026). Extraia Valor da Causa se Advogado."""
                 analise_ia = consultar_ia(p_t, "Perito Judicial Sênior", 0.2)
                 status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                 salvar_na_planilha(client_sheets, {
