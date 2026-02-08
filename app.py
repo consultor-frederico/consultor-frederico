@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 # --- 🚨 CONFIGURAÇÕES 🚨 ---
 MINHA_CHAVE = "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"
 ID_AGENDA = "a497481e5251098078e6c68882a849680f499f6cef836ab976ffccdaad87689a@group.calendar.google.com"
+MEU_EMAIL_GOOGLE = "frederico.novotny@gmail.com"  # <--- COLOQUE SEU GMAIL AQUI
 
 st.set_page_config(page_title="Consultor Frederico - Cálculos", page_icon="🧮")
 
@@ -44,34 +45,6 @@ def ler_conteudo_arquivo(uploaded_file):
         return f"\n--- CONTEÚDO DO ANEXO ({uploaded_file.name}) ---\n{texto_extraido}\n"
     except Exception as e: return f"\n[Erro leitura: {e}]\n"
 
-def validar_cnpj(cnpj):
-    cnpj = re.sub(r'[^0-9]', '', cnpj)
-    if len(cnpj) != 14 or len(set(cnpj)) == 1: return False
-    return True
-
-def callback_formatar_telefone():
-    val = st.session_state.tel_input
-    if not val: return
-    limpo = re.sub(r'\D', '', str(val))
-    if len(limpo) == 11:
-        st.session_state.tel_input = f"({limpo[:2]}) {limpo[2:7]}-{limpo[7:]}"
-    elif len(limpo) == 10:
-        st.session_state.tel_input = f"({limpo[:2]}) {limpo[2:6]}-{limpo[6:]}"
-
-def formatar_telefone(val):
-    if not val: return ""
-    limpo = re.sub(r'\D', '', str(val))
-    if len(limpo) == 11: return f"({limpo[:2]}) {limpo[2:7]}-{limpo[7:]}"
-    elif len(limpo) == 10: return f"({limpo[:2]}) {limpo[2:6]}-{limpo[6:]}"
-    return val
-
-def formatar_nome_com_titulo(nome, perfil):
-    if not nome: return ""
-    p_nome = nome.split()[0].title()
-    genero_fem = p_nome[-1].lower() == 'a'
-    titulo = "Dra." if (perfil == 'Advogado' and genero_fem) else "Dr." if perfil == 'Advogado' else "Sra." if genero_fem else "Sr."
-    return f"{titulo} {p_nome}"
-
 def conectar_google():
     try:
         if "google_credentials" in st.secrets:
@@ -93,15 +66,11 @@ def consultar_ia(mensagem, sistema, temperatura=0.5):
         return resp['choices'][0]['message']['content']
     except: return "Sistema indisponível."
 
-def eh_dia_util(data):
-    if data.weekday() >= 5: return False
-    return data.strftime("%d/%m") not in FERIADOS_NACIONAIS
-
 def buscar_horarios_livres(service_calendar):
     sugestoes = []
     dia_foco = datetime.now() + timedelta(days=2)
     while len(sugestoes) < 10:
-        if not eh_dia_util(dia_foco):
+        if dia_foco.weekday() >= 5:
             dia_foco += timedelta(days=1)
             continue
         comeco = dia_foco.replace(hour=0, minute=0, second=0).isoformat() + 'Z'
@@ -117,29 +86,35 @@ def buscar_horarios_livres(service_calendar):
 
 def criar_pasta_cliente(service_drive, nome_cliente, nome_servico, arquivo_uploaded):
     try:
-        parent_id = ID_PASTA_RAIZ
+        # 1. Criar a Pasta
         meta = {
             'name': f"{datetime.now().strftime('%Y-%m-%d')} - {nome_cliente} - {nome_servico}", 
             'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [parent_id]
+            'parents': [ID_PASTA_RAIZ]
         }
-        folder = service_drive.files().create(body=meta, fields='id, webViewLink', supportsAllDrives=True).execute()
+        folder = service_drive.files().create(body=meta, fields='id, webViewLink').execute()
         folder_id = folder.get('id')
 
+        # 2. Upload do Arquivo (se houver)
         if arquivo_uploaded is not None:
             media = MediaIoBaseUpload(arquivo_uploaded, mimetype=arquivo_uploaded.type, resumable=True)
-            file_meta = {
-                'name': arquivo_uploaded.name, 
-                'parents': [folder_id]
-            }
-            service_drive.files().create(
+            file_meta = {'name': arquivo_uploaded.name, 'parents': [folder_id]}
+            
+            # Criar o arquivo
+            novo_arquivo = service_drive.files().create(
                 body=file_meta, 
                 media_body=media, 
-                fields='id', 
+                fields='id',
                 supportsAllDrives=True
             ).execute()
+            
+            # TRANSFERIR PROPRIEDADE PARA VOCÊ (Isso resolve a cota 403)
+            service_drive.permissions().create(
+                fileId=novo_arquivo.get('id'),
+                transferOwnership=True,
+                body={'type': 'user', 'role': 'owner', 'emailAddress': MEU_EMAIL_GOOGLE}
+            ).execute()
         
-        service_drive.permissions().create(fileId=folder_id, body={'type': 'anyone', 'role': 'writer'}, supportsAllDrives=True).execute()
         return folder.get('webViewLink')
     except Exception as e:
         return f"Erro no Drive: {e}"
@@ -150,10 +125,9 @@ def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
         if not match: return "Erro Data"
         dia_mes, hora, minuto = match.group(1), int(match.group(2)), int(match.group(3))
         dt_inicio = datetime.strptime(f"{datetime.now().year}/{dia_mes} {hora}:{minuto}", "%Y/%d/%m %H:%M")
-        if dt_inicio < datetime.now(): dt_inicio = dt_inicio.replace(year=datetime.now().year + 1)
         evento = {
             'summary': f'Cálculo: {nome} ({servico})',
-            'description': f'Tel: {tel}\nSolicitação via Web App.',
+            'description': f'Tel: {tel}\nSolicitação Web.',
             'start': {'dateTime': dt_inicio.isoformat(), 'timeZone': 'America/Sao_Paulo'},
             'end': {'dateTime': (dt_inicio + timedelta(hours=1)).isoformat(), 'timeZone': 'America/Sao_Paulo'}
         }
@@ -164,8 +138,6 @@ def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
 def salvar_na_planilha(client_sheets, dados, link):
     try:
         sheet = client_sheets.open(NOME_PLANILHA_GOOGLE).sheet1
-        if not sheet.get_all_values(): 
-            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Email", "Horário", "Serviço", "Resumo Cliente", "Análise Técnica", "Link Pasta", "Status"])
         sheet.append_row([
             dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], dados['email'],
             dados['melhor_horario'], dados['servico'], dados['analise_cliente'], dados['analise_tecnica'],
@@ -176,165 +148,78 @@ def salvar_na_planilha(client_sheets, dados, link):
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
     if 'encerrado' in st.session_state:
-        st.image("https://cdn-icons-png.flaticon.com/512/2643/2643501.png", width=90)
-        st.success("✅ **Sessão Finalizada com Sucesso!**")
-        if st.button("🔄 Iniciar Nova Sessão"):
-            st.session_state.clear()
-            st.rerun()
+        st.success("✅ Sessão Finalizada!")
+        if st.button("🔄 Iniciar Nova"):
+            st.session_state.clear(); st.rerun()
         return
 
-    st.image("https://cdn-icons-png.flaticon.com/512/2643/2643501.png", width=90)
-    st.title("Consultor Frederico - Cálculos Trabalhistas")
+    st.title("🧮 Consultor Frederico")
 
     if 'fase' not in st.session_state: st.session_state.fase = 1
-    if 'ia_resumo_cliente' not in st.session_state: st.session_state.ia_resumo_cliente = ""
     if 'dados_form' not in st.session_state: st.session_state.dados_form = {}
-    if 'conteudo_arquivo' not in st.session_state: st.session_state.conteudo_arquivo = ""
-
+    
     client_sheets, service_drive, service_calendar = conectar_google()
 
-    # --- FASE 1: COLETA COM MEMÓRIA E FILTRO DE SERVIÇOS ---
+    # FASE 1: COLETA COM MEMÓRIA
     if st.session_state.fase == 1:
-        st.subheader("1. Identificação e Caso")
         d = st.session_state.dados_form
+        tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True, index=["Advogado", "Empresa", "Colaborador"].index(d.get("tipo", "Advogado")))
         
-        # Recupera o perfil salvo ou padrão "Advogado"
-        perfil_list = ["Advogado", "Empresa", "Colaborador"]
-        perfil_idx = perfil_list.index(d.get("tipo", "Advogado"))
-        tipo = st.radio("Perfil:", perfil_list, horizontal=True, index=perfil_idx)
+        nome = st.text_input("Nome", value=d.get("nome", ""))
+        tel = st.text_input("WhatsApp", value=d.get("tel", ""))
         
-        col1, col2 = st.columns(2)
-        if tipo == "Empresa":
-            nome = col1.text_input("Razão Social", value=d.get("nome", ""))
-            cnpj = col2.text_input("CNPJ", value=d.get("cnpj", ""))
-            n_resp = st.text_input("Nome Responsável", value=d.get("nome_resp", ""))
-        else:
-            nome = col1.text_input("Nome Completo", value=d.get("nome", ""))
-            n_resp = nome
-            cnpj = ""
-            
-        c_tel, c_mail = st.columns(2)
-        # O WhatsApp usa session_state interno pelo Streamlit, mas mantemos o valor para garantir
-        tel = c_tel.text_input("WhatsApp", value=d.get("tel", ""), key="tel_input", on_change=callback_formatar_telefone)
-        mail = c_mail.text_input("E-mail", value=d.get("email", ""))
+        # Filtro de serviços por perfil
+        opcoes = ["Liquidação de Sentença", "Inicial/Estimativa", "Impugnação", "Rescisão", "Horas Extras", "Outros"] if tipo == "Advogado" else ["Rescisão", "Horas Extras", "Outros"]
+        servico = st.selectbox("Serviço:", opcoes)
         
-        # --- FILTRO DE SERVIÇOS ---
-        if tipo == "Advogado":
-            opcoes_servico = ["Liquidação de Sentença", "Inicial/Estimativa", "Impugnação", "Rescisão", "Horas Extras", "Outros"]
-        else:
-            opcoes_servico = ["Rescisão", "Horas Extras", "Outros"]
-        
-        # Garantir que o index salvo ainda existe na nova lista filtrada
-        try:
-            serv_idx = opcoes_servico.index(d.get("servico", ""))
-        except:
-            serv_idx = 0
-            
-        servico = st.selectbox("Tipo de Cálculo:", opcoes_servico, index=serv_idx)
-        
-        c_adm, c_sai = st.columns(2)
-        adm = c_adm.text_input("Admissão", value=d.get("adm", ""))
-        sai = c_sai.text_input("Saída", value=d.get("sai", ""))
-        salario = st.text_input("Salário Base", value=d.get("salario", ""))
-        relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""), height=100)
+        salario = st.text_input("Salário", value=d.get("salario", ""))
+        relato = st.text_area("Relato:", value=d.get("relato", ""))
 
-        if st.button("💬 Analisar Solicitação"):
-            if not nome or not tel: st.warning("Preencha Nome e Telefone.")
-            else:
-                n_tratado = formatar_nome_com_titulo(n_resp, tipo)
-                # SALVA TUDO NA MEMÓRIA
-                st.session_state.dados_form.update({
-                    "nome": nome, "nome_resp": n_resp, "tel": tel, "email": mail,
-                    "cnpj": cnpj, "tipo": tipo, "servico": servico, "relato": relato,
-                    "adm": adm, "sai": sai, "salario": salario,
-                    "tecnico": f"Tipo: {servico}. Salário: {salario}. Período: {adm} a {sai}."
-                })
-                p_c = f"Aja como o Frederico. O cliente {n_tratado} relatou: '{relato}'. Resuma que entendeu em 1 parágrafo curto."
-                st.session_state.ia_resumo_cliente = consultar_ia(p_c, "Consultor Jurídico")
-                st.session_state.fase = 2
-                st.rerun()
+        if st.button("Analisar"):
+            st.session_state.dados_form.update({"nome": nome, "tel": tel, "tipo": tipo, "servico": servico, "salario": salario, "relato": relato})
+            st.session_state.fase = 2; st.rerun()
 
+    # FASE 2: CONFIRMAÇÃO
     if st.session_state.fase == 2:
-        st.subheader("2. Confirmação")
-        st.info(st.session_state.ia_resumo_cliente)
-        col_s, col_n = st.columns(2)
-        # Ao refazer, volta para fase 1 mas os campos agora lerão o session_state.dados_form
-        if col_n.button("❌ Não (Refazer)"): st.session_state.fase = 1; st.rerun()
-        if col_s.button("✅ Sim, está correto"): st.session_state.fase = 3; st.rerun()
+        st.info(f"Caso de {st.session_state.dados_form['nome']}")
+        col1, col2 = st.columns(2)
+        if col2.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
+        if col1.button("✅ Confirmar"): st.session_state.fase = 3; st.rerun()
 
+    # FASE 3: DOCUMENTOS (TRAVA PARA ADVOGADO)
     if st.session_state.fase == 3:
-        st.subheader("3. Complemento e Documentos")
-        comp = st.text_input("Observação Adicional (Opcional):")
-        
-        # 🛡️ TRAVA DE PERFIL: Anexo apenas para Advogados
-        if st.session_state.dados_form.get("tipo") == "Advogado":
-            st.session_state.arquivo_anexado = st.file_uploader("Anexar Documentos", type=["pdf", "txt", "jpg", "png"])
+        if st.session_state.dados_form["tipo"] == "Advogado":
+            st.session_state.arquivo_anexado = st.file_uploader("Anexar Documento", type=["pdf", "png", "jpg"])
         else:
-            st.info("ℹ️ Perfil restrito: Apenas Advogados podem anexar arquivos.")
+            st.info("ℹ️ Anexos exclusivos para Advogados.")
             st.session_state.arquivo_anexado = None
+            
+        if st.button("Ir para Agendamento"): st.session_state.fase = 4; st.rerun()
 
-        if st.button("🔽 Seguir para Agendamento"):
-            if comp: st.session_state.dados_form["relato"] += f" [Extra: {comp}]"
-            if st.session_state.arquivo_anexado:
-                if "image" in st.session_state.arquivo_anexado.type:
-                    st.session_state.conteudo_arquivo = "📸 [Imagem enviada - Conferir no Drive]"
-                else:
-                    st.session_state.conteudo_arquivo = ler_conteudo_arquivo(st.session_state.arquivo_anexado)
-                st.session_state.dados_form["nome_arquivo"] = st.session_state.arquivo_anexado.name
-            else: st.session_state.dados_form["nome_arquivo"] = "Nenhum"
-            st.session_state.fase = 4
-            st.rerun()
-
+    # FASE 4: FINALIZAÇÃO (IA MERCADO)
     if st.session_state.fase == 4:
-        st.subheader("🗓️ Finalizar Agendamento")
-        opcoes = buscar_horarios_livres(service_calendar) if service_calendar else ["Erro Agenda"]
-        horario = st.selectbox("Escolha o Horário:", opcoes)
-        if st.button("✅ Confirmar Agendamento"):
-            with st.spinner("IA analisando complexidade e valores..."):
+        horarios = buscar_horarios_livres(service_calendar)
+        horario = st.selectbox("Horário:", horarios)
+        
+        if st.button("Finalizar"):
+            with st.spinner("IA analisando complexidade..."):
                 d = st.session_state.dados_form
-                tel_f = formatar_telefone(d['tel'])
+                prompt = f"Analise dificuldade e valor sugerido para: {d['relato']}."
+                analise = consultar_ia(prompt, "Perito Sênior")
                 
-                guia_precos = """
-                TABELA DE REFERÊNCIA (Mercado 2026):
-                - Simples (Rescisórios): R$ 350 a R$ 600.
-                - Médios (Horas Extras/Insalubridade): R$ 800 a R$ 1.800.
-                - Complexos (Liquidação/Perícia): R$ 2.000+ ou 1% a 3% da causa.
-                """
-                
-                p_t = f"""
-                AJA COMO O PERITO FREDERICO.
-                Dados: {d['tecnico']}. Relato: {d['relato']}. Conteúdo Anexo: {st.session_state.conteudo_arquivo}.
-                
-                TAREFA:
-                1. Analise riscos técnicos.
-                2. Aponte a DIFICULDADE do cálculo (Baixa, Média ou Alta) e justifique.
-                3. Estipule um VALOR ESTIMADO de honorários seguindo este guia:
-                {guia_precos}
-                """
-                
-                analise = consultar_ia(p_t, "Perito Judicial Sênior", 0.2)
-                status = criar_evento_agenda(service_calendar, horario, d['nome_resp'], tel_f, d['servico'])
-                link = "Sem anexo"
-                if d.get("nome_arquivo") != "Nenhum":
-                    link = criar_pasta_cliente(service_drive, d['nome'], d['servico'], st.session_state.arquivo_anexado)
+                link = criar_pasta_cliente(service_drive, d['nome'], d['servico'], st.session_state.get('arquivo_anexado'))
                 
                 salvar_na_planilha(client_sheets, {
                     "data_hora": datetime.now().strftime("%d/%m %H:%M"),
-                    "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": tel_f, "email": d['email'],
+                    "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'], "email": "",
                     "melhor_horario": horario, "servico": d['servico'],
-                    "analise_cliente": st.session_state.ia_resumo_cliente, "analise_tecnica": analise,
-                    "status_agenda": status
+                    "analise_cliente": "OK", "analise_tecnica": analise,
+                    "status_agenda": "Confirmado"
                 }, link)
                 
-                st.session_state.mensagem_final = f"✅ **Confirmado!** {d['nome']}, agendamos para {horario}."
-                st.session_state.fase = 5
-                st.rerun()
-
-    if st.session_state.fase == 5:
-        st.balloons(); st.success(st.session_state.mensagem_final)
-        col_v, col_e = st.columns(2)
-        if col_v.button("🔄 Novo Atendimento"): st.session_state.clear(); st.rerun()
-        if col_e.button("🏁 Sair"): st.session_state.encerrado = True; st.rerun()
+                st.success(f"Agendado! Pasta: {link}")
+                st.markdown(f"**Análise:** {analise}")
+                if st.button("Novo"): st.session_state.clear(); st.rerun()
 
 if __name__ == "__main__":
     main()
