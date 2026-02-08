@@ -134,7 +134,6 @@ def main():
         st.subheader("1. Identificação e Caso")
         d = st.session_state.dados_form
         
-        # 🔄 Persistência do Perfil
         p_idx = ["Advogado", "Empresa", "Colaborador"].index(d.get("tipo", "Advogado"))
         tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True, index=p_idx)
         
@@ -201,28 +200,29 @@ def main():
                 analise_ia = consultar_ia(p_t, "Perito Judicial")
                 status_agenda = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                 
+                # O Parecer é salvo na planilha mas NÃO é exibido na tela final
                 sucesso = salvar_na_planilha(client_sheets, {
                     "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'], "email": d['email'],
                     "melhor_horario": horario, "servico": d['servico'], "analise_cliente": st.session_state.ia_resumo_cliente, "analise_tecnica": analise_ia, "status_agenda": status_agenda
                 })
                 
                 if sucesso:
-                    st.session_state.analise_final = analise_ia
                     st.session_state.fase = 5; st.rerun()
 
     if st.session_state.fase == 5:
-        st.success("✅ Atendimento registrado com sucesso!")
-        st.markdown(f"### Parecer do Perito:\n{st.session_state.get('analise_final', '')}")
+        st.balloons()
+        st.success("✅ Solicitação enviada com sucesso!")
         st.divider()
         st.subheader("Obrigado por utilizar nossos serviços!")
-        st.write("Sua solicitação foi enviada e o horário reservado em nossa agenda.")
+        st.write("Sua solicitação foi processada e o horário foi reservado em nossa agenda.")
+        st.info("Entraremos em contato em breve para dar andamento à sua demanda.")
         
         col_nov, col_fec = st.columns(2)
         if col_nov.button("🔄 Nova Consulta"):
             st.session_state.clear()
             st.rerun()
-        if col_fec.button("🚪 Sair / Fechar"):
-            st.write("Você já pode fechar esta aba com segurança.")
+        if col_fec.button("🚪 Sair"):
+            st.write("Atendimento encerrado. Você pode fechar esta aba.")
             st.stop()
 
 if __name__ == "__main__":
