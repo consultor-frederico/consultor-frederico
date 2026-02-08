@@ -111,7 +111,7 @@ def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
         dt_inicio = datetime.strptime(f"{datetime.now().year}/{dia_mes} {hora}:{minuto}", "%Y/%d/%m %H:%M")
         evento = {
             'summary': f'Cálculo: {nome} ({servico})',
-            'description': f'Tel: {tel}\nSolicitação via Web App.',
+            'description': f'Tel: {tel}\nSolicitação Web App.',
             'start': {'dateTime': dt_inicio.isoformat(), 'timeZone': 'America/Sao_Paulo'},
             'end': {'dateTime': (dt_inicio + timedelta(hours=1)).isoformat(), 'timeZone': 'America/Sao_Paulo'}
         }
@@ -123,11 +123,11 @@ def salvar_na_planilha(client_sheets, dados):
     try:
         sheet = client_sheets.open(NOME_PLANILHA_GOOGLE).sheet1
         if not sheet.get_all_values(): 
-            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Email", "Horário", "Serviço", "Análise Cliente", "Análise Técnica", "Status Arquivo", "Status"])
+            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Email", "Horário", "Serviço", "Resumo Cliente", "Análise Técnica", "Status Arquivo", "Status"])
         sheet.append_row([
             dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], dados['email'],
             dados['melhor_horario'], dados['servico'], dados['analise_cliente'], dados['analise_tecnica'],
-            "Processado (Não Armazenado)", dados['status_agenda']
+            "Processado em Memória (Não Salvo)", dados['status_agenda']
         ])
     except: pass
 
@@ -161,10 +161,12 @@ def main():
         col1, col2 = st.columns(2)
         if tipo == "Empresa":
             nome = col1.text_input("Razão Social", value=d.get("nome", ""))
+            cnpj = col2.text_input("CNPJ", value=d.get("cnpj", ""))
             n_resp = st.text_input("Nome Responsável", value=d.get("nome_resp", ""))
         else:
             nome = col1.text_input("Nome Completo", value=d.get("nome", ""))
             n_resp = nome
+            cnpj = ""
             
         c_tel, c_mail = st.columns(2)
         tel = c_tel.text_input("WhatsApp", value=d.get("tel", ""), key="tel_input", on_change=callback_formatar_telefone)
@@ -184,7 +186,7 @@ def main():
                 n_tratado = formatar_nome_com_titulo(n_resp, tipo)
                 st.session_state.dados_form.update({
                     "nome": nome, "nome_resp": n_resp, "tel": tel, "email": mail,
-                    "tipo": tipo, "servico": servico, "relato": relato, "salario": salario,
+                    "cnpj": cnpj, "tipo": tipo, "servico": servico, "relato": relato, "salario": salario,
                     "tecnico": f"Tipo: {servico}. Salário: {salario}."
                 })
                 p_c = f"Aja como o Frederico. O cliente {n_tratado} relatou: '{relato}'. Resuma que entendeu em 1 parágrafo curto."
@@ -201,17 +203,20 @@ def main():
 
     if st.session_state.fase == 3:
         st.subheader("3. Documentos para Análise")
-        st.warning("🔒 Análise apenas em memória. Seus arquivos não serão salvos no Drive.")
+        st.warning("🔒 Seus arquivos NÃO serão armazenados. Eles serão utilizados apenas para uma análise inicial da IA.")
         
         comp = st.text_input("Observação Adicional (Opcional):")
-        arquivo_uploaded = st.file_uploader("Anexar Documentos para a IA ler", type=["pdf", "txt", "jpg", "png"])
         
+        # TODOS os perfis podem mandar arquivos agora
+        arquivo_uploaded = st.file_uploader("Anexar Documentos para a IA ler", type=["pdf", "txt", "jpg", "png"])
         if arquivo_uploaded:
             if "image" in arquivo_uploaded.type:
                 st.session_state.conteudo_arquivo = "📸 [Imagem enviada para análise visual]"
             else:
                 st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo_uploaded)
-        
+        else:
+            st.session_state.conteudo_arquivo = "Nenhum arquivo enviado."
+
         if st.button("🔽 Seguir para Agendamento"):
             if comp: st.session_state.dados_form["relato"] += f" [Extra: {comp}]"
             st.session_state.fase = 4
@@ -232,13 +237,13 @@ def main():
                 analise_ia = consultar_ia(p_t, "Perito Judicial Sênior", 0.2)
                 status = criar_evento_agenda(service_calendar, horario, d['nome_resp'], tel_f, d['servico'])
                 
-                # SALVA TUDO NA PLANILHA GOOGLE
+                # SALVA TUDO NA PLANILHA ATENDIMENTO_FRED
                 salvar_na_planilha(client_sheets, {
                     "data_hora": datetime.now().strftime("%d/%m %H:%M"),
                     "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": tel_f, "email": d['email'],
                     "melhor_horario": horario, "servico": d['servico'],
-                    "analise_cliente": st.session_state.ia_resumo_cliente, # <--- Salvando o resumo confirmado
-                    "analise_tecnica": analise_ia, # <--- Salvando a análise de preço/dificuldade
+                    "analise_cliente": st.session_state.ia_resumo_cliente,
+                    "analise_tecnica": analise_ia,
                     "status_agenda": status
                 })
                 
