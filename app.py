@@ -132,7 +132,6 @@ def criar_pasta_cliente(service_drive, nome_cliente, nome_servico, arquivo_uploa
                 'name': arquivo_uploaded.name, 
                 'parents': [folder_id]
             }
-            # O parâmetro supportsAllDrives=True ajuda a mitigar erros de permissão em pastas compartilhadas
             service_drive.files().create(
                 body=file_meta, 
                 media_body=media, 
@@ -194,13 +193,15 @@ def main():
 
     client_sheets, service_drive, service_calendar = conectar_google()
 
+    # --- FASE 1: COLETA COM MEMÓRIA E FILTRO DE SERVIÇOS ---
     if st.session_state.fase == 1:
         st.subheader("1. Identificação e Caso")
         d = st.session_state.dados_form
         
-        # Manutenção de dados para "Refazer"
-        perfil_index = ["Advogado", "Empresa", "Colaborador"].index(d.get("tipo", "Advogado"))
-        tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True, index=perfil_index)
+        # Recupera o perfil salvo ou padrão "Advogado"
+        perfil_list = ["Advogado", "Empresa", "Colaborador"]
+        perfil_idx = perfil_list.index(d.get("tipo", "Advogado"))
+        tipo = st.radio("Perfil:", perfil_list, horizontal=True, index=perfil_idx)
         
         col1, col2 = st.columns(2)
         if tipo == "Empresa":
@@ -213,12 +214,23 @@ def main():
             cnpj = ""
             
         c_tel, c_mail = st.columns(2)
+        # O WhatsApp usa session_state interno pelo Streamlit, mas mantemos o valor para garantir
         tel = c_tel.text_input("WhatsApp", value=d.get("tel", ""), key="tel_input", on_change=callback_formatar_telefone)
         mail = c_mail.text_input("E-mail", value=d.get("email", ""))
         
-        opcoes_servico = ["Liquidação de Sentença", "Inicial/Estimativa", "Impugnação", "Rescisão", "Horas Extras", "Outros"]
-        serv_index = opcoes_servico.index(d.get("servico", "Liquidação de Sentença"))
-        servico = st.selectbox("Tipo de Cálculo:", opcoes_servico, index=serv_index)
+        # --- FILTRO DE SERVIÇOS ---
+        if tipo == "Advogado":
+            opcoes_servico = ["Liquidação de Sentença", "Inicial/Estimativa", "Impugnação", "Rescisão", "Horas Extras", "Outros"]
+        else:
+            opcoes_servico = ["Rescisão", "Horas Extras", "Outros"]
+        
+        # Garantir que o index salvo ainda existe na nova lista filtrada
+        try:
+            serv_idx = opcoes_servico.index(d.get("servico", ""))
+        except:
+            serv_idx = 0
+            
+        servico = st.selectbox("Tipo de Cálculo:", opcoes_servico, index=serv_idx)
         
         c_adm, c_sai = st.columns(2)
         adm = c_adm.text_input("Admissão", value=d.get("adm", ""))
@@ -230,6 +242,7 @@ def main():
             if not nome or not tel: st.warning("Preencha Nome e Telefone.")
             else:
                 n_tratado = formatar_nome_com_titulo(n_resp, tipo)
+                # SALVA TUDO NA MEMÓRIA
                 st.session_state.dados_form.update({
                     "nome": nome, "nome_resp": n_resp, "tel": tel, "email": mail,
                     "cnpj": cnpj, "tipo": tipo, "servico": servico, "relato": relato,
@@ -245,6 +258,7 @@ def main():
         st.subheader("2. Confirmação")
         st.info(st.session_state.ia_resumo_cliente)
         col_s, col_n = st.columns(2)
+        # Ao refazer, volta para fase 1 mas os campos agora lerão o session_state.dados_form
         if col_n.button("❌ Não (Refazer)"): st.session_state.fase = 1; st.rerun()
         if col_s.button("✅ Sim, está correto"): st.session_state.fase = 3; st.rerun()
 
@@ -252,7 +266,7 @@ def main():
         st.subheader("3. Complemento e Documentos")
         comp = st.text_input("Observação Adicional (Opcional):")
         
-        # 🛡️ Trava: Apenas Advogado anexa arquivos
+        # 🛡️ TRAVA DE PERFIL: Anexo apenas para Advogados
         if st.session_state.dados_form.get("tipo") == "Advogado":
             st.session_state.arquivo_anexado = st.file_uploader("Anexar Documentos", type=["pdf", "txt", "jpg", "png"])
         else:
@@ -280,7 +294,6 @@ def main():
                 d = st.session_state.dados_form
                 tel_f = formatar_telefone(d['tel'])
                 
-                # Prompt com lógica de honorários e dificuldade
                 guia_precos = """
                 TABELA DE REFERÊNCIA (Mercado 2026):
                 - Simples (Rescisórios): R$ 350 a R$ 600.
