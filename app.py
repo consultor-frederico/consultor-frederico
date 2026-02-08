@@ -141,18 +141,34 @@ def buscar_horarios_livres(service_calendar):
 
 def criar_pasta_cliente(service_drive, nome_cliente, nome_servico, arquivo_uploaded):
     try:
-        # 1. Definimos o ID da pasta pai diretamente (substituindo a busca por nome)
         parent_id = '1ZTZ-6-Q46LOQqLTZsxhdefUgsNypNNMS'
         
-        # 2. Cria a nova pasta do cliente dentro da pasta pai
         meta = {
             'name': f"{datetime.now().strftime('%Y-%m-%d')} - {nome_cliente} - {nome_servico}", 
             'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [parent_id]  # Indicamos a pasta pai aqui
+            'parents': [parent_id]
         }
         
         folder = service_drive.files().create(body=meta, fields='id, webViewLink').execute()
         folder_id = folder.get('id')
+
+        # --- CORREÇÃO DE IDENTAÇÃO AQUI ---
+        if arquivo_uploaded is not None:
+            media = MediaIoBaseUpload(arquivo_uploaded, mimetype=arquivo_uploaded.type, resumable=True)
+            file_meta = {'name': arquivo_uploaded.name, 'parents': [folder_id]}
+            # Adicionamos supportsAllDrives para ajudar com a cota
+            service_drive.files().create(
+                body=file_meta, 
+                media_body=media, 
+                fields='id',
+                supportsAllDrives=True 
+            ).execute()
+        
+        service_drive.permissions().create(fileId=folder_id, body={'type': 'anyone', 'role': 'writer'}).execute()
+        
+        return folder.get('webViewLink')
+    except Exception as e:
+        return f"Erro no Drive: {e}"
 
      # 3. Faz o upload do arquivo real (Se houver) 📤
      if arquivo_uploaded is not None:
@@ -424,6 +440,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
