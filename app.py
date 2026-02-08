@@ -182,7 +182,7 @@ def criar_pasta_cliente(service_drive, nome_cliente, nome_servico, arquivo_uploa
 
 def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
     try:
-        match = re.search(r"(\d{2}/\d{2}).*às (\d{2}):(\d{2})", horario_texto)
+        match = re.search(r"(\d{2}/\d{2}).*às (\d{1,2}):(\d{2})", horario_texto)
         if not match: return "Erro Data"
         dia_mes, hora, minuto = match.group(1), int(match.group(2)), int(match.group(3))
         dt_inicio = datetime.strptime(f"{datetime.now().year}/{dia_mes} {hora}:{minuto}", "%Y/%d/%m %H:%M")
@@ -415,4 +415,5 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
