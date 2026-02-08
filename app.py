@@ -41,6 +41,15 @@ def ler_conteudo_arquivo(uploaded_file):
         return f"\n--- CONTEÚDO DO ANEXO ({uploaded_file.name}) ---\n{texto_extraido}\n"
     except Exception as e: return f"\n[Erro leitura: {e}]\n"
 
+# --- 🆕 NOVAS FUNÇÕES DE MÁSCARA (MONETÁRIA E DATA) ---
+
+def formatar_moeda(val):
+    """Transforma números em formato R$ (Ex: 150050 -> R$ 1.500,50)"""
+    limpo = re.sub(r'\D', '', str(val))
+    if not limpo: return ""
+    valor_float = float(limpo) / 100
+    return f"R$ {valor_float:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
 def formatar_data_auto(val):
     limpo = re.sub(r'\D', '', str(val))
     if len(limpo) == 8:
@@ -172,24 +181,26 @@ def main():
         servico = st.selectbox("Tipo de Cálculo:", opcoes_servico, index=serv_idx)
         
         c_adm, c_sai = st.columns(2)
-        raw_adm = c_adm.text_input("Admissão (digite apenas números)", value=d.get("adm", ""), placeholder="Ex: 01052020")
-        raw_sai = c_sai.text_input("Saída (digite apenas números)", value=d.get("sai", ""), placeholder="Ex: 10022026")
+        raw_adm = c_adm.text_input("Admissão (apenas números)", value=d.get("adm", ""), placeholder="Ex: 01052020")
+        raw_sai = c_sai.text_input("Saída (apenas números)", value=d.get("sai", ""), placeholder="Ex: 10022026")
         
         adm = formatar_data_auto(raw_adm)
         sai = formatar_data_auto(raw_sai)
         
-        salario = st.text_input("Salário Base", value=d.get("salario", ""))
+        # --- 💰 CAMPO COM MÁSCARA MONETÁRIA 💰 ---
+        raw_salario = st.text_input("Salário Base (digite apenas números)", value=d.get("salario", ""), placeholder="Ex: 250000 para R$ 2.500,00")
+        salario = formatar_moeda(raw_salario)
+        if salario: st.caption(f"Valor identificado: **{salario}**")
+        
         relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""), height=100)
 
         if st.button("💬 Analisar Solicitação"):
             if not nome or not tel: 
                 st.warning("Preencha Nome e Telefone.")
             elif mail and not validar_email(mail):
-                st.error("E-mail inválido! O e-mail deve conter '@' e '.'")
-            elif not validar_data_final(adm):
-                st.error("Data de Admissão inválida! Digite 8 números (Ex: 01012020)")
-            elif not validar_data_final(sai):
-                st.error("Data de Saída inválida! Digite 8 números (Ex: 01012024)")
+                st.error("E-mail inválido!")
+            elif not validar_data_final(adm) or not validar_data_final(sai):
+                st.error("Verifique as datas (DDMMYYYY)")
             else:
                 st.session_state.dados_form.update({
                     "nome": nome, "tel": tel, "email": mail, "tipo": tipo, 
@@ -210,17 +221,12 @@ def main():
         if col_s.button("✅ Sim, está correto"): st.session_state.fase = 3; st.rerun()
 
     if st.session_state.fase == 3:
-        st.subheader("3. Complemento e Documentos para Análise")
-        st.warning("🔒 Análise apenas em memória. Seus arquivos não serão salvos no Drive.")
-        
-        comp = st.text_input("Observação Adicional (Opcional):")
-        arquivo_uploaded = st.file_uploader("Anexar Documentos para a IA ler", type=["pdf", "txt", "jpg", "png"])
-        
+        st.subheader("3. Complemento e Documentos")
+        st.warning("🔒 Análise temporária. Seus arquivos não serão salvos.")
+        comp = st.text_input("Observação Adicional:")
+        arquivo_uploaded = st.file_uploader("Anexar Documentos", type=["pdf", "txt", "jpg", "png"])
         if arquivo_uploaded:
-            if "image" in arquivo_uploaded.type:
-                st.session_state.conteudo_arquivo = "📸 [Imagem enviada - Análise visual necessária]"
-            else:
-                st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo_uploaded)
+            st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo_uploaded)
         
         if st.button("🔽 Seguir para Agendamento"):
             if comp: st.session_state.dados_form["relato"] += f" [Extra: {comp}]"
@@ -236,21 +242,11 @@ def main():
                 d = st.session_state.dados_form
                 tel_f = formatar_telefone(d['tel'])
                 
-                # --- 🧠 PROMPT INTELIGENTE E PERSONALIZADO POR PERFIL 🧠 ---
                 p_t = f"""
-                AJA COMO O PERITO JUDICIAL SÊNIOR FREDERICO.
-                CONTEXTO DO CLIENTE: Perfil {d['tipo']}. Serviço: {d['servico']}.
-                DADOS BASE: {d['tecnico']}.
-                RELATO: {d['relato']}.
-                CONTEÚDO EXTRAÍDO DO ARQUIVO (ANÁLISE OBRIGATÓRIA): {st.session_state.conteudo_arquivo}.
-
-                SUA TAREFA (EXTRAIA O MÁXIMO DE DADOS, POIS O ARQUIVO SERÁ DESCARTADO):
-                1. DIFICULDADE TÉCNICA: Avalie como Baixa, Médio ou Alta. Justifique com base em riscos de impugnação.
-                2. ANÁLISE DE VALORES (MERCADO 2026):
-                   - Se Perfil for 'Advogado': Busque no texto o VALOR DA CAUSA ou VALOR DA CONDENAÇÃO. Sugira honorários entre R$ 1.500 a R$ 3.500 (ou 1% a 2% do valor da causa se for alto).
-                   - Se Perfil for 'Empresa': Foque no custo de defesa e volume de dados. Sugira R$ 1.200 a R$ 2.800.
-                   - Se Perfil for 'Colaborador': Foque em conferência simples. Sugira R$ 400 a R$ 900.
-                3. DETALHAMENTO TÉCNICO: Liste datas chaves, nomes de partes ou números de processo encontrados no arquivo para registro na planilha.
+                AJA COMO O PERITO FREDERICO. contexto {d['tipo']}.
+                DADOS: {d['tecnico']}. RELATO: {d['relato']}. ANEXO: {st.session_state.conteudo_arquivo}.
+                Determine Dificuldade e Valor Sugerido (Mercado 2026).
+                Extraia o máximo de informações do anexo (processos, partes, valores).
                 """
                 
                 analise_ia = consultar_ia(p_t, "Perito Judicial Sênior", 0.2)
@@ -272,9 +268,8 @@ def main():
 
     if st.session_state.fase == 5:
         st.balloons()
-        col_v, col_e = st.columns(2)
-        if col_v.button("🔄 Novo Atendimento"): st.session_state.clear(); st.rerun()
-        if col_e.button("🏁 Sair"): st.session_state.encerrado = True; st.rerun()
+        if st.button("🔄 Novo Atendimento"): st.session_state.clear(); st.rerun()
+        if st.button("🏁 Sair"): st.session_state.encerrado = True; st.rerun()
 
 if __name__ == "__main__":
     main()
