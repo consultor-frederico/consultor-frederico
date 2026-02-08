@@ -225,9 +225,10 @@ def main():
                 })
                 with st.spinner("IA processando..."):
                     # 🆕 Prompt Ajustado para Gênero, Tratamento e Filtro de Assunto
+                    msg_bloqueio = "A IA só está programada para atender sobre cálculos trabalhistas ou demandas da área."
                     p_resumo = f"""
                     O usuário se chama {nome}. O perfil é {tipo}. O relato é: '{relato}'.
-                    Instrução 1: Se o relato NÃO for sobre cálculos trabalhistas ou área trabalhista, responda APENAS: 'A IA só está programada para atender sobre cálculos trabalhistas ou demandas da área.'.
+                    Instrução 1: Se o relato NÃO for sobre cálculos trabalhistas ou área trabalhista, responda APENAS: '{msg_bloqueio}'.
                     Instrução 2: Se for sobre a área, identifique o gênero pelo nome e use o tratamento correto (Sr., Sra., ou Doutor/Doutora caso seja Advogado).
                     Instrução 3: Responda de forma estritamente direta confirmando que entendeu o que ele pediu e o objetivo principal. Máximo 2 frases.
                     """
@@ -237,8 +238,14 @@ def main():
     if st.session_state.fase == 2:
         st.subheader("2. Confirmação")
         st.info(st.session_state.ia_resumo_cliente)
+        
+        bloqueado = "A IA só está programada para atender sobre cálculos trabalhistas" in st.session_state.ia_resumo_cliente
+        
         col_v, col_r = st.columns(2)
-        if col_v.button("✅ Confirmar"): st.session_state.fase = 3; st.rerun()
+        
+        if not bloqueado:
+            if col_v.button("✅ Confirmar"): st.session_state.fase = 3; st.rerun()
+        
         if col_r.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
 
     if st.session_state.fase == 3:
@@ -266,7 +273,6 @@ def main():
             if st.button("✅ Confirmar Tudo"):
                 with st.spinner("Gravando..."):
                     d = st.session_state.dados_form
-                    # 🆕 Prompt Técnico para Planilha com Demanda Completa + Arquivos
                     p_t = f"""
                     Analise a demanda completa: Perfil {d['tipo']}, Serviço {d['servico']}, Salário {d['salario']}.
                     Relato do usuário: {d['relato']}.
