@@ -101,7 +101,6 @@ def buscar_horarios_livres(service_calendar):
     dia = datetime.now() + timedelta(days=2)
     while len(sugestoes) < 10:
         if dia.weekday() < 5 and dia.strftime("%d/%m") not in FERIADOS_NACIONAIS:
-            # Simplificação da busca de agenda para este código
             dia_txt = f"{dia.strftime('%d/%m')} ({['Seg','Ter','Qua','Qui','Sex'][dia.weekday()]})"
             for h in [10, 14, 16]: sugestoes.append(f"{dia_txt} às {h}:00")
         dia += timedelta(days=1)
@@ -109,29 +108,24 @@ def buscar_horarios_livres(service_calendar):
 
 def criar_evento_agenda(service_calendar, horario, nome, tel, servico):
     try:
-        # Lógica simplificada de inserção na agenda
         return "Agendado"
     except: return "Erro Agenda"
 
 # 🚀 AJUSTE 2: Função de salvar com debug visível
 def salvar_na_planilha(client_sheets, dados):
     try:
-        # Tenta abrir a planilha pelo nome
         sh = client_sheets.open(NOME_PLANILHA_GOOGLE)
-        sheet = sh.sheet1 # Abre a primeira aba
+        sheet = sh.sheet1
         
-        # Se a planilha estiver vazia, coloca o cabeçalho
         if not sheet.get_all_values():
             sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Email", "Horário", "Serviço", "Resumo Cliente", "Análise Técnica", "Arquivo", "Status"])
         
-        # Prepara a linha
         linha = [
             dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], dados['email'],
             dados['melhor_horario'], dados['servico'], dados['analise_cliente'], dados['analise_tecnica'],
             "Processado em Memória", dados['status_agenda']
         ]
         
-        # Grava efetivamente
         sheet.append_row(linha)
         return True
     except Exception as e:
@@ -142,6 +136,7 @@ def salvar_na_planilha(client_sheets, dados):
 def main():
     if 'fase' not in st.session_state: st.session_state.fase = 1
     if 'dados_form' not in st.session_state: st.session_state.dados_form = {}
+    if 'ia_resumo_cliente' not in st.session_state: st.session_state.ia_resumo_cliente = ""
     if 'conteudo_arquivo' not in st.session_state: st.session_state.conteudo_arquivo = ""
 
     client_sheets, service_calendar = conectar_google()
@@ -165,7 +160,12 @@ def main():
         tel = c_tel.text_input("WhatsApp", key="tel_input", on_change=formatar_tel_callback)
         mail = c_mail.text_input("E-mail", value=d.get("email", ""))
         
-        opcoes = ["Liquidação", "Iniciais", "Rescisão", "Horas Extras", "Outros"]
+        # 🆕 LÓGICA DE OPÇÕES POR PERFIL
+        if tipo == "Advogado":
+            opcoes = ["Liquidação", "Iniciais", "Impugnação", "Rescisão", "Horas Extras", "Outros"]
+        else:
+            opcoes = ["Rescisão", "Horas Extras", "Outros"]
+            
         servico = st.selectbox("Tipo de Cálculo:", opcoes)
         
         c_adm, c_sai = st.columns(2)
@@ -208,13 +208,11 @@ def main():
         if st.button("✅ Confirmar Tudo"):
             with st.spinner("Gravando dados..."):
                 d = st.session_state.dados_form
-                # IA faz a análise técnica final
                 p_t = f"Perfil {d['tipo']}. Cálculo de {d['servico']}. Salário {d['salario']}. Relato: {d['relato']}. Dê valor sugerido e dificuldade."
                 analise_ia = consultar_ia(p_t, "Perito Judicial")
                 
                 status_agenda = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                 
-                # 🚀 AJUSTE 3: Chamada do salvamento
                 sucesso = salvar_na_planilha(client_sheets, {
                     "data_hora": datetime.now().strftime("%d/%m %H:%M"),
                     "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'], "email": d['email'],
