@@ -41,10 +41,7 @@ def ler_conteudo_arquivo(uploaded_file):
         return f"\n--- CONTEÚDO DO ANEXO ({uploaded_file.name}) ---\n{texto_extraido}\n"
     except Exception as e: return f"\n[Erro leitura: {e}]\n"
 
-# --- 🆕 NOVAS FUNÇÕES DE MÁSCARA (MONETÁRIA E DATA) ---
-
 def formatar_moeda(val):
-    """Transforma números em formato R$ (Ex: 150050 -> R$ 1.500,50)"""
     limpo = re.sub(r'\D', '', str(val))
     if not limpo: return ""
     valor_float = float(limpo) / 100
@@ -54,6 +51,12 @@ def formatar_data_auto(val):
     limpo = re.sub(r'\D', '', str(val))
     if len(limpo) == 8:
         return f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
+    return val
+
+def formatar_cnpj(val):
+    limpo = re.sub(r'\D', '', str(val))
+    if len(limpo) == 14:
+        return f"{limpo[:2]}.{limpo[2:5]}.{limpo[5:8]}/{limpo[8:12]}-{limpo[12:]}"
     return val
 
 def validar_email(email):
@@ -155,7 +158,6 @@ def salvar_na_planilha(client_sheets, dados):
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
     if 'fase' not in st.session_state: st.session_state.fase = 1
-    if 'ia_resumo_cliente' not in st.session_state: st.session_state.ia_resumo_cliente = ""
     if 'dados_form' not in st.session_state: st.session_state.dados_form = {}
     if 'conteudo_arquivo' not in st.session_state: st.session_state.conteudo_arquivo = ""
 
@@ -169,8 +171,17 @@ def main():
         tipo = st.radio("Perfil:", perfil_list, horizontal=True, index=perfil_idx)
         
         col1, col2 = st.columns(2)
-        nome = col1.text_input("Nome/Razão Social", value=d.get("nome", ""))
-        
+        if tipo == "Empresa":
+            nome = col1.text_input("Razão Social", value=d.get("nome", ""))
+            raw_cnpj = col2.text_input("CNPJ (apenas números)", value=d.get("cnpj", ""), placeholder="00000000000100")
+            cnpj = formatar_cnpj(raw_cnpj)
+            if cnpj: st.caption(f"CNPJ: **{cnpj}**")
+            n_resp = st.text_input("Nome do Responsável", value=d.get("nome_resp", ""))
+        else:
+            nome = col1.text_input("Nome Completo", value=d.get("nome", ""))
+            n_resp = nome
+            cnpj = ""
+            
         c_tel, c_mail = st.columns(2)
         tel = c_tel.text_input("WhatsApp", value=d.get("tel", ""), key="tel_input", on_change=callback_formatar_telefone)
         mail = c_mail.text_input("E-mail", value=d.get("email", ""))
@@ -187,24 +198,26 @@ def main():
         adm = formatar_data_auto(raw_adm)
         sai = formatar_data_auto(raw_sai)
         
-        # --- 💰 CAMPO COM MÁSCARA MONETÁRIA 💰 ---
-        raw_salario = st.text_input("Salário Base (digite apenas números)", value=d.get("salario", ""), placeholder="Ex: 250000 para R$ 2.500,00")
+        raw_salario = st.text_input("Salário Base (apenas números)", value=d.get("salario", ""), placeholder="Ex: 250000")
         salario = formatar_moeda(raw_salario)
-        if salario: st.caption(f"Valor identificado: **{salario}**")
+        if salario: st.caption(f"Salário: **{salario}**")
         
         relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""), height=100)
 
         if st.button("💬 Analisar Solicitação"):
             if not nome or not tel: 
                 st.warning("Preencha Nome e Telefone.")
+            elif tipo == "Empresa" and len(re.sub(r'\D', '', raw_cnpj)) != 14:
+                st.error("CNPJ deve conter 14 números.")
             elif mail and not validar_email(mail):
                 st.error("E-mail inválido!")
             elif not validar_data_final(adm) or not validar_data_final(sai):
                 st.error("Verifique as datas (DDMMYYYY)")
             else:
+                n_tratado = formatar_nome_com_titulo(n_resp, tipo)
                 st.session_state.dados_form.update({
-                    "nome": nome, "tel": tel, "email": mail, "tipo": tipo, 
-                    "servico": servico, "relato": relato, "salario": salario,
+                    "nome": nome, "nome_resp": n_resp, "tel": tel, "email": mail, "cnpj": cnpj,
+                    "tipo": tipo, "servico": servico, "relato": relato, "salario": salario,
                     "adm": adm, "sai": sai,
                     "tecnico": f"Tipo: {servico}. Salário: {salario}. Período: {adm} a {sai}."
                 })
@@ -223,8 +236,8 @@ def main():
     if st.session_state.fase == 3:
         st.subheader("3. Complemento e Documentos")
         st.warning("🔒 Análise temporária. Seus arquivos não serão salvos.")
-        comp = st.text_input("Observação Adicional:")
-        arquivo_uploaded = st.file_uploader("Anexar Documentos", type=["pdf", "txt", "jpg", "png"])
+        comp = st.text_input("Observação Adicional (Opcional):")
+        arquivo_uploaded = st.file_uploader("Anexar Documentos para a IA ler", type=["pdf", "txt", "jpg", "png"])
         if arquivo_uploaded:
             st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo_uploaded)
         
