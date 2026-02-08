@@ -104,34 +104,28 @@ def consultar_ia(mensagem, sistema, temperatura=0.5):
 def buscar_horarios_livres(service_calendar):
     sugestoes = []
     dia_foco = datetime.now() + timedelta(days=1)
-    
     while len(sugestoes) < 12:
         if dia_foco.weekday() >= 5 or dia_foco.strftime("%d/%m") in FERIADOS_NACIONAIS:
             dia_foco += timedelta(days=1)
             continue
-        
         inicio_iso = dia_foco.replace(hour=9, minute=0, second=0).isoformat() + 'Z'
         fim_iso = dia_foco.replace(hour=18, minute=0, second=0).isoformat() + 'Z'
-        
         events_result = service_calendar.events().list(
             calendarId=ID_AGENDA, timeMin=inicio_iso, timeMax=fim_iso,
             singleEvents=True, orderBy='startTime'
         ).execute()
         events = events_result.get('items', [])
-        
         horas_ocupadas = []
         for event in events:
             start = event['start'].get('dateTime', event['start'].get('date'))
             if 'T' in start:
                 h_inicio = datetime.fromisoformat(start.replace('Z', '')).hour
                 horas_ocupadas.append(h_inicio)
-
         dia_txt = f"{dia_foco.strftime('%d/%m')} ({['Seg','Ter','Qua','Qui','Sex'][dia_foco.weekday()]})"
         for h in range(9, 18):
             if h == 12: continue 
             if h not in horas_ocupadas:
                 sugestoes.append(f"{dia_txt} às {h}:00")
-        
         dia_foco += timedelta(days=1)
     return sugestoes[:15]
 
@@ -142,17 +136,14 @@ def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
         hora_pt = partes[1]
         ano_atual = datetime.now().year
         data_completa = datetime.strptime(f"{data_pt}/{ano_atual} {hora_pt}", "%d/%m/%Y %H:%M")
-        
         start_time = data_completa.isoformat()
         end_time = (data_completa + timedelta(hours=1)).isoformat()
-
         evento = {
             'summary': f'Cálculo: {nome} ({servico})',
             'description': f'WhatsApp: {tel}\nSolicitação via Web App Frederico.',
             'start': {'dateTime': start_time, 'timeZone': 'America/Sao_Paulo'},
             'end': {'dateTime': end_time, 'timeZone': 'America/Sao_Paulo'},
         }
-
         service_calendar.events().insert(calendarId=ID_AGENDA, body=evento).execute()
         return "Agendado com Sucesso"
     except Exception as e:
@@ -163,8 +154,12 @@ def salvar_na_planilha(client_sheets, dados):
         sh = client_sheets.open(NOME_PLANILHA_GOOGLE)
         sheet = sh.sheet1
         if not sheet.get_all_values():
-            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Email", "Horário", "Serviço", "Resumo Cliente", "Análise Técnica", "Arquivo", "Status"])
-        linha = [dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], dados['email'], dados['melhor_horario'], dados['servico'], dados['analise_cliente'], dados['analise_tecnica'], "Processado", dados['status_agenda']]
+            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Email", "Horário", "Serviço", "Texto Original", "Resumo Cliente", "Análise Técnica", "Arquivo", "Status"])
+        linha = [
+            dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], dados['email'], 
+            dados['melhor_horario'], dados['servico'], dados['texto_original'], dados['analise_cliente'], 
+            dados['analise_tecnica'], "Processado", dados['status_agenda']
+        ]
         sheet.append_row(linha)
         return True
     except Exception as e:
@@ -180,7 +175,7 @@ def main():
 
     client_sheets, service_calendar = conectar_google()
 
-    # 🆕 MODIFICAÇÃO: Cabeçalho com Nome em Destaque, Cargo maior e Calculadora Moderna
+    # Cabeçalho Visual
     col_logo, col_text = st.columns([1, 4])
     with col_logo:
         st.markdown("<h1 style='text-align: center; margin-top: 5px;'>📟</h1>", unsafe_allow_html=True)
@@ -228,8 +223,14 @@ def main():
                     "cnpj": st.session_state.get("cnpj_input", ""), "tipo": tipo, "servico": servico, 
                     "relato": relato, "salario": st.session_state.sal_input, "adm": st.session_state.adm_input, "sai": st.session_state.sai_input
                 })
-                with st.spinner("IA entendendo o caso..."):
-                    p_resumo = f"Aja como Frederico. O cliente relatou: '{relato}'. Apenas diga que entendeu e cite o objetivo de forma amigável em no máximo 2 frases."
+                with st.spinner("IA processando..."):
+                    # 🆕 Prompt Ajustado para Gênero, Tratamento e Filtro de Assunto
+                    p_resumo = f"""
+                    O usuário se chama {nome}. O perfil é {tipo}. O relato é: '{relato}'.
+                    Instrução 1: Se o relato NÃO for sobre cálculos trabalhistas ou área trabalhista, responda APENAS: 'A IA só está programada para atender sobre cálculos trabalhistas ou demandas da área.'.
+                    Instrução 2: Se for sobre a área, identifique o gênero pelo nome e use o tratamento correto (Sr., Sra., ou Doutor/Doutora caso seja Advogado).
+                    Instrução 3: Responda de forma estritamente direta confirmando que entendeu o que ele pediu e o objetivo principal. Máximo 2 frases.
+                    """
                     st.session_state.ia_resumo_cliente = consultar_ia(p_resumo, "Consultor Jurídico")
                     st.session_state.fase = 2; st.rerun()
 
@@ -252,34 +253,35 @@ def main():
                     st.write(st.session_state.dados_form.get("relato", ""))
             else:
                 st.success("Conteúdo do arquivo processado com sucesso.")
-        
         if st.button("🔽 Ir para Agendamento"): st.session_state.fase = 4; st.rerun()
 
     if st.session_state.fase == 4:
         st.subheader("🗓️ Finalizar")
-        with st.spinner("Consultando horários disponíveis..."):
+        with st.spinner("Verificando agenda..."):
             horarios = buscar_horarios_livres(service_calendar)
-        
         if not horarios:
-            st.error("Nenhum horário disponível encontrado.")
+            st.error("Nenhum horário disponível.")
         else:
             horario = st.selectbox("Escolha o Horário:", horarios)
-            
             if st.button("✅ Confirmar Tudo"):
-                with st.spinner("Gravando dados..."):
+                with st.spinner("Gravando..."):
                     d = st.session_state.dados_form
-                    p_t = f"Perfil {d['tipo']}. Cálculo de {d['servico']}. Salário {d['salario']}. Relato: {d['relato']}. CONTEÚDO DO ARQUIVO: {st.session_state.get('conteudo_arquivo', 'Não enviado')}. Dê valor sugerido e dificuldade técnica."
+                    # 🆕 Prompt Técnico para Planilha com Demanda Completa + Arquivos
+                    p_t = f"""
+                    Analise a demanda completa: Perfil {d['tipo']}, Serviço {d['servico']}, Salário {d['salario']}.
+                    Relato do usuário: {d['relato']}.
+                    Conteúdo dos arquivos: {st.session_state.get('conteudo_arquivo', 'Nenhum arquivo enviado')}.
+                    Forneça uma análise técnica detalhada, sugira valores e avalie a dificuldade.
+                    """
                     analise_ia = consultar_ia(p_t, "Perito Judicial")
-                    
                     status_agenda = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                     
                     sucesso = salvar_na_planilha(client_sheets, {
                         "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'], "email": d['email'],
-                        "melhor_horario": horario, "servico": d['servico'], "analise_cliente": st.session_state.ia_resumo_cliente, "analise_tecnica": analise_ia, "status_agenda": status_agenda
+                        "melhor_horario": horario, "servico": d['servico'], "texto_original": d['relato'], "analise_cliente": st.session_state.ia_resumo_cliente, 
+                        "analise_tecnica": analise_ia, "status_agenda": status_agenda
                     })
-                    
-                    if sucesso:
-                        st.session_state.fase = 5; st.rerun()
+                    if sucesso: st.session_state.fase = 5; st.rerun()
 
     if st.session_state.fase == 5:
         st.balloons()
@@ -287,11 +289,9 @@ def main():
         st.divider()
         st.subheader("Obrigado por utilizar nossos serviços!")
         st.write("Sua solicitação foi processada e o horário foi reservado em nossa agenda.")
-        
         col_nov, col_fec = st.columns(2)
         if col_nov.button("🔄 Nova Consulta"):
-            st.session_state.clear()
-            st.rerun()
+            st.session_state.clear(); st.rerun()
         if col_fec.button("🚪 Sair"):
             st.stop()
 
