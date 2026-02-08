@@ -110,8 +110,31 @@ def buscar_horarios_livres(service_calendar):
         dia += timedelta(days=1)
     return sugestoes[:10]
 
-def criar_evento_agenda(service_calendar, horario, nome, tel, servico):
-    return "Agendado"
+# 🆕 MODIFICAÇÃO: Lógica real de inserção na agenda
+def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
+    try:
+        # Extrair data e hora do texto: "dd/mm (Dia) às hh:mm"
+        partes = horario_texto.split(" às ")
+        data_pt = partes[0].split(" ")[0] # "dd/mm"
+        hora_pt = partes[1]               # "hh:mm"
+        
+        ano_atual = datetime.now().year
+        data_completa = datetime.strptime(f"{data_pt}/{ano_atual} {hora_pt}", "%d/%m/%Y %H:%M")
+        
+        start_time = data_completa.isoformat()
+        end_time = (data_completa + timedelta(hours=1)).isoformat()
+
+        evento = {
+            'summary': f'Cálculo: {nome} ({servico})',
+            'description': f'WhatsApp: {tel}\nSolicitação via Web App Frederico.',
+            'start': {'dateTime': start_time, 'timeZone': 'America/Sao_Paulo'},
+            'end': {'dateTime': end_time, 'timeZone': 'America/Sao_Paulo'},
+        }
+
+        service_calendar.events().insert(calendarId=ID_AGENDA, body=evento).execute()
+        return "Agendado com Sucesso"
+    except Exception as e:
+        return f"Erro Agenda: {str(e)}"
 
 def salvar_na_planilha(client_sheets, dados):
     try:
@@ -138,7 +161,6 @@ def main():
     if st.session_state.fase == 1:
         st.subheader("1. Identificação e Caso")
         d = st.session_state.dados_form
-        
         p_idx = ["Advogado", "Empresa", "Colaborador"].index(d.get("tipo", "Advogado"))
         tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True, index=p_idx)
         
@@ -189,13 +211,11 @@ def main():
 
     if st.session_state.fase == 3:
         st.subheader("3. Documentos")
-        # 🆕 ALTERAÇÃO: Apenas PDF e TXT visíveis no seletor
         arquivo = st.file_uploader("Anexar Documento (PDF ou TXT)", type=["pdf", "txt"])
         if arquivo: 
             conteudo = ler_conteudo_arquivo(arquivo)
             st.session_state.conteudo_arquivo = conteudo
             
-            # 🆕 ALTERAÇÃO: Se houver aviso de imagem/digitalização, abre o quadro com o relato
             if "[AVISO" in conteudo:
                 st.warning(conteudo)
                 with st.expander("📝 Seu Relato da Fase anterior", expanded=True):
@@ -216,6 +236,8 @@ def main():
                 d = st.session_state.dados_form
                 p_t = f"Perfil {d['tipo']}. Cálculo de {d['servico']}. Salário {d['salario']}. Relato: {d['relato']}. CONTEÚDO DO ARQUIVO: {st.session_state.get('conteudo_arquivo', 'Não enviado')}. Dê valor sugerido e dificuldade técnica."
                 analise_ia = consultar_ia(p_t, "Perito Judicial")
+                
+                # Chamada da lógica real de agendamento
                 status_agenda = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                 
                 sucesso = salvar_na_planilha(client_sheets, {
