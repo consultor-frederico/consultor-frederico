@@ -224,7 +224,6 @@ def main():
                     "relato": relato, "salario": st.session_state.sal_input, "adm": st.session_state.adm_input, "sai": st.session_state.sai_input
                 })
                 with st.spinner("IA processando..."):
-                    # Prompt Ajustado para Gênero e Hierarquia de Tratamento
                     msg_bloqueio = "A IA só está programada para atender sobre cálculos trabalhistas ou demandas da área."
                     p_resumo = f"""
                     O usuário se chama {nome}. O perfil selecionado é {tipo}. O relato é: '{relato}'.
@@ -245,7 +244,7 @@ def main():
         st.subheader("2. Confirmação")
         st.info(st.session_state.ia_resumo_cliente)
         
-        # 🆕 MODIFICAÇÃO: Mensagem com resumo do que foi dito
+        # Resumo dos dados informados
         d = st.session_state.dados_form
         with st.expander("📝 Ver resumo dos dados informados", expanded=False):
             st.write(f"**Nome:** {d['nome']}")
@@ -264,11 +263,11 @@ def main():
     if st.session_state.fase == 3:
         st.subheader("3. Documentos")
         
-        # 🆕 MODIFICAÇÃO: Mensagem de orientações e privacidade
+        # 🆕 MODIFICAÇÃO: Mensagem de privacidade e orientação técnica
         st.markdown("""
         > **Por favor, envie os arquivos necessários para o seu cálculo.**
         > 
-        > 🔒 **Privacidade:** Os arquivos enviados **não serão armazenados** permanentemente em nosso sistema. Eles serão utilizados apenas para auxiliar na análise inicial da IA Groq.
+        > 🔒 **Privacidade:** Os arquivos enviados **não serão armazenados** permanentemente em nosso sistema. Eles serão utilizados apenas para auxiliar na análise inicial da IA.
         > 
         > ⚠️ **Nota:** Esta é uma triagem automatizada. Qualquer detalhe mais técnico ou específico deverá ser tratado diretamente com o **Consultor Frederico**.
         """)
