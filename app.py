@@ -175,7 +175,7 @@ def main():
 
     client_sheets, service_calendar = conectar_google()
 
-    # 🆕 MODIFICAÇÃO: Cabeçalho Visual Destaque (Aproximado e Maior)
+    # Cabeçalho Visual
     col_logo, col_text = st.columns([1, 4])
     with col_logo:
         st.markdown("<h1 style='text-align: center; margin-top: 5px;'>📟</h1>", unsafe_allow_html=True)
@@ -224,7 +224,7 @@ def main():
                     "relato": relato, "salario": st.session_state.sal_input, "adm": st.session_state.adm_input, "sai": st.session_state.sai_input
                 })
                 with st.spinner("IA processando..."):
-                    # 🆕 MODIFICAÇÃO: Prompt Ajustado para Gênero e Hierarquia de Tratamento
+                    # Prompt Ajustado para Gênero e Hierarquia de Tratamento
                     msg_bloqueio = "A IA só está programada para atender sobre cálculos trabalhistas ou demandas da área."
                     p_resumo = f"""
                     O usuário se chama {nome}. O perfil selecionado é {tipo}. O relato é: '{relato}'.
@@ -245,15 +245,34 @@ def main():
         st.subheader("2. Confirmação")
         st.info(st.session_state.ia_resumo_cliente)
         
+        # 🆕 MODIFICAÇÃO: Mensagem com resumo do que foi dito
+        d = st.session_state.dados_form
+        with st.expander("📝 Ver resumo dos dados informados", expanded=False):
+            st.write(f"**Nome:** {d['nome']}")
+            st.write(f"**Serviço:** {d['servico']}")
+            st.write(f"**Salário:** {d['salario']}")
+            st.write(f"**Relato:** {d['relato']}")
+        
         bloqueado = "A IA só está programada para atender sobre cálculos trabalhistas" in st.session_state.ia_resumo_cliente
         
         col_v, col_r = st.columns(2)
         if not bloqueado:
-            if col_v.button("✅ Confirmar"): st.session_state.fase = 3; st.rerun()
+            if col_v.button("✅ Confirmar e Prosseguir"): 
+                st.session_state.fase = 3; st.rerun()
         if col_r.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
 
     if st.session_state.fase == 3:
         st.subheader("3. Documentos")
+        
+        # 🆕 MODIFICAÇÃO: Mensagem de orientações e privacidade
+        st.markdown("""
+        > **Por favor, envie os arquivos necessários para o seu cálculo.**
+        > 
+        > 🔒 **Privacidade:** Os arquivos enviados **não serão armazenados** permanentemente em nosso sistema. Eles serão utilizados apenas para auxiliar na análise inicial da IA Groq.
+        > 
+        > ⚠️ **Nota:** Esta é uma triagem automatizada. Qualquer detalhe mais técnico ou específico deverá ser tratado diretamente com o **Consultor Frederico**.
+        """)
+        
         arquivo = st.file_uploader("Anexar Documento (PDF ou TXT)", type=["pdf", "txt"])
         if arquivo: 
             conteudo = ler_conteudo_arquivo(arquivo)
@@ -264,6 +283,7 @@ def main():
                     st.write(st.session_state.dados_form.get("relato", ""))
             else:
                 st.success("Conteúdo do arquivo processado com sucesso.")
+        
         if st.button("🔽 Ir para Agendamento"): st.session_state.fase = 4; st.rerun()
 
     if st.session_state.fase == 4:
