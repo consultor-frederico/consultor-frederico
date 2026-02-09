@@ -175,13 +175,13 @@ def main():
 
     client_sheets, service_calendar = conectar_google()
 
-    # Cabeçalho Visual
+    # 🆕 MODIFICAÇÃO: Cabeçalho Visual Destaque (Aproximado e Maior)
     col_logo, col_text = st.columns([1, 4])
     with col_logo:
         st.markdown("<h1 style='text-align: center; margin-top: 5px;'>📟</h1>", unsafe_allow_html=True)
     with col_text:
         st.markdown("<h1 style='margin-bottom: -15px; padding-bottom: 0;'>Frederico Novotny</h1>", unsafe_allow_html=True)
-        st.markdown("<h3 style='color: #555; margin-top: 0; padding-top: 0;'>Consultor Trabalhista</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='color: gray; margin-top: 0; padding-top: 0;'>Consultor Trabalhista</h3>", unsafe_allow_html=True)
     st.divider()
 
     if st.session_state.fase == 1:
@@ -224,13 +224,19 @@ def main():
                     "relato": relato, "salario": st.session_state.sal_input, "adm": st.session_state.adm_input, "sai": st.session_state.sai_input
                 })
                 with st.spinner("IA processando..."):
-                    # 🆕 Prompt Ajustado para Gênero, Tratamento e Filtro de Assunto
+                    # 🆕 MODIFICAÇÃO: Prompt Ajustado para Gênero e Hierarquia de Tratamento
                     msg_bloqueio = "A IA só está programada para atender sobre cálculos trabalhistas ou demandas da área."
                     p_resumo = f"""
-                    O usuário se chama {nome}. O perfil é {tipo}. O relato é: '{relato}'.
-                    Instrução 1: Se o relato NÃO for sobre cálculos trabalhistas ou área trabalhista, responda APENAS: '{msg_bloqueio}'.
-                    Instrução 2: Se for sobre a área, identifique o gênero pelo nome e use o tratamento correto (Sr., Sra., ou Doutor/Doutora caso seja Advogado).
-                    Instrução 3: Responda de forma estritamente direta confirmando que entendeu o que ele pediu e o objetivo principal. Máximo 2 frases.
+                    O usuário se chama {nome}. O perfil selecionado é {tipo}. O relato é: '{relato}'.
+                    
+                    REGRAS DE TRATAMENTO (OBRIGATÓRIO):
+                    1. Identifique o gênero do usuário pelo nome: {nome}.
+                    2. SE o perfil for 'Advogado', trate EXCLUSIVAMENTE por 'Doutor' ou 'Doutora'. Nunca use Sr. ou Sra.
+                    3. SE o perfil for 'Empresa' ou 'Colaborador', trate por 'Sr.' ou 'Sra.'.
+                    
+                    REGRAS DE CONTEÚDO:
+                    1. Se o relato NÃO for sobre cálculos trabalhistas ou área trabalhista, responda APENAS: '{msg_bloqueio}'.
+                    2. Se for da área, confirme objetivamente que entendeu e cite o objetivo principal. Máximo 2 frases.
                     """
                     st.session_state.ia_resumo_cliente = consultar_ia(p_resumo, "Consultor Jurídico")
                     st.session_state.fase = 2; st.rerun()
@@ -242,10 +248,8 @@ def main():
         bloqueado = "A IA só está programada para atender sobre cálculos trabalhistas" in st.session_state.ia_resumo_cliente
         
         col_v, col_r = st.columns(2)
-        
         if not bloqueado:
             if col_v.button("✅ Confirmar"): st.session_state.fase = 3; st.rerun()
-        
         if col_r.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
 
     if st.session_state.fase == 3:
