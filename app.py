@@ -12,7 +12,7 @@ from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 
 # --- 🚨 CONFIGURAÇÕES 🚨 ---
-MINHA_CHAVE = "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"
+MINHA_CHAVE = "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"
 ID_AGENDA = "a497481e5251098078e6c68882a849680f499f6cef836ab976ffccdaad87689a@group.calendar.google.com"
 
 st.set_page_config(page_title="Consultor Frederico - Cálculos", page_icon="🧮")
@@ -336,3 +336,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
