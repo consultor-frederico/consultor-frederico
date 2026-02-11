@@ -12,6 +12,7 @@ from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 
 # --- 🚨 CONFIGURAÇÕES 🚨 ---
+# 🆕 Chave atualizada com sucesso
 MINHA_CHAVE = "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"
 ID_AGENDA = "a497481e5251098078e6c68882a849680f499f6cef836ab976ffccdaad87689a@group.calendar.google.com"
 
@@ -92,24 +93,22 @@ def conectar_google():
         st.error(f"❌ Erro de Conexão Google: {e}")
         return None, None
 
-# 🆕 FUNÇÃO DA IA ATUALIZADA (COM DEBUG)
 def consultar_ia(mensagem, sistema, temperatura=0.5):
     try:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {MINHA_CHAVE}", "Content-Type": "application/json"}
         
-        # Alterado para o modelo llama3-8b que é mais estável para testes
+        # Modelo atualizado e estável
         dados = {
-            "model": "llama3-8b-8192", 
+            "model": "llama-3.1-8b-instant", 
             "messages": [{"role": "system", "content": sistema}, {"role": "user", "content": mensagem}], 
             "temperature": temperatura
         }
         
         resp = requests.post(url, headers=headers, json=dados)
         
-        # Se a resposta não for 200 (sucesso), ele mostra o erro técnico
         if resp.status_code != 200:
-            return f"Erro Técnico na API: {resp.status_code} - {resp.text}"
+            return f"Erro Técnico na API: {resp.status_code} - Verifique a validade da chave."
             
         return resp.json()['choices'][0]['message']['content']
     except Exception as e: 
@@ -266,10 +265,11 @@ def main():
             st.write(f"**Salário:** {d['salario']}")
             st.write(f"**Relato:** {d['relato']}")
         
-        bloqueado = "A IA só está programada para atender sobre cálculos trabalhistas" in st.session_state.ia_resumo_cliente
-        
+        bloqueado = "A IA só está programada para atender" in st.session_state.ia_resumo_cliente
+        erro = "Erro Técnico" in st.session_state.ia_resumo_cliente
+
         col_v, col_r = st.columns(2)
-        if not bloqueado and "Erro" not in st.session_state.ia_resumo_cliente:
+        if not bloqueado and not erro:
             if col_v.button("✅ Confirmar e Prosseguir"): 
                 st.session_state.fase = 3; st.rerun()
         if col_r.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
@@ -336,4 +336,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
