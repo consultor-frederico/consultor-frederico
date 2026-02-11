@@ -92,14 +92,28 @@ def conectar_google():
         st.error(f"❌ Erro de Conexão Google: {e}")
         return None, None
 
+# 🆕 FUNÇÃO DA IA ATUALIZADA (COM DEBUG)
 def consultar_ia(mensagem, sistema, temperatura=0.5):
     try:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {MINHA_CHAVE}", "Content-Type": "application/json"}
-        dados = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "system", "content": sistema}, {"role": "user", "content": mensagem}], "temperature": temperatura}
-        resp = requests.post(url, headers=headers, json=dados).json()
-        return resp['choices'][0]['message']['content']
-    except: return "IA temporariamente indisponível."
+        
+        # Alterado para o modelo llama3-8b que é mais estável para testes
+        dados = {
+            "model": "llama3-8b-8192", 
+            "messages": [{"role": "system", "content": sistema}, {"role": "user", "content": mensagem}], 
+            "temperature": temperatura
+        }
+        
+        resp = requests.post(url, headers=headers, json=dados)
+        
+        # Se a resposta não for 200 (sucesso), ele mostra o erro técnico
+        if resp.status_code != 200:
+            return f"Erro Técnico na API: {resp.status_code} - {resp.text}"
+            
+        return resp.json()['choices'][0]['message']['content']
+    except Exception as e: 
+        return f"Erro de Conexão: {str(e)}"
 
 def buscar_horarios_livres(service_calendar):
     sugestoes = []
@@ -255,15 +269,13 @@ def main():
         bloqueado = "A IA só está programada para atender sobre cálculos trabalhistas" in st.session_state.ia_resumo_cliente
         
         col_v, col_r = st.columns(2)
-        if not bloqueado:
+        if not bloqueado and "Erro" not in st.session_state.ia_resumo_cliente:
             if col_v.button("✅ Confirmar e Prosseguir"): 
                 st.session_state.fase = 3; st.rerun()
         if col_r.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
 
     if st.session_state.fase == 3:
         st.subheader("3. Documentos")
-        
-        # 🆕 MODIFICAÇÃO: Mensagem de privacidade e orientação técnica conforme solicitado
         st.markdown("""
         > **Por favor, envie os arquivos necessários para o seu cálculo.**
         > 
@@ -271,7 +283,6 @@ def main():
         > 
         > ⚠️ **Nota:** Esta é uma triagem automatizada. Qualquer detalhe mais técnico ou específico deverá ser tratado diretamente com o **Consultor Frederico**.
         """)
-        
         arquivo = st.file_uploader("Anexar Documento (PDF ou TXT)", type=["pdf", "txt"])
         if arquivo: 
             conteudo = ler_conteudo_arquivo(arquivo)
@@ -282,7 +293,6 @@ def main():
                     st.write(st.session_state.dados_form.get("relato", ""))
             else:
                 st.success("Conteúdo do arquivo processado com sucesso.")
-        
         if st.button("🔽 Ir para Agendamento"): st.session_state.fase = 4; st.rerun()
 
     if st.session_state.fase == 4:
