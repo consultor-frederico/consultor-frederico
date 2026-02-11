@@ -175,7 +175,7 @@ def main():
 
     client_sheets, service_calendar = conectar_google()
 
-    # Cabeçalho Visual
+    # Cabeçalho Visual Destaque
     col_logo, col_text = st.columns([1, 4])
     with col_logo:
         st.markdown("<h1 style='text-align: center; margin-top: 5px;'>📟</h1>", unsafe_allow_html=True)
@@ -263,7 +263,7 @@ def main():
     if st.session_state.fase == 3:
         st.subheader("3. Documentos")
         
-        # 🆕 MODIFICAÇÃO: Mensagem de privacidade e orientação técnica
+        # 🆕 MODIFICAÇÃO: Mensagem de privacidade e orientação técnica conforme solicitado
         st.markdown("""
         > **Por favor, envie os arquivos necessários para o seu cálculo.**
         > 
