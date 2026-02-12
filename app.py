@@ -233,41 +233,44 @@ def main():
                     Aja como o assistente do Consultor Frederico. 
                     Usuário: {nome} | Perfil: {tipo} | Relato: '{relato}'
                     
-                    REGRAS DE FILTRO E RESPOSTA:
-                    1. Verifique se o assunto é sobre cálculos ou demandas trabalhistas.
-                    2. Se NÃO for trabalhista, responda de forma CORDIAL mas firme, variando a frase, mas sempre dizendo que o sistema foi programado exclusivamente para atendimentos trabalhistas e de cálculos.
-                    3. Se FOR trabalhista, confirme o entendimento com saudação Dr(a). ou Sr(a). em máx 2 frases.
-                    
-                    IMPORTANTE: Se o assunto for proibido, inclua a palavra '[BLOQUEADO]' no final da sua resposta (isso não aparecerá para o cliente).
+                    REGRAS DE FILTRO:
+                    1. Analise se o assunto é trabalhista ou de cálculo.
+                    2. Se NÃO for, responda de forma cordial e variada dizendo que o sistema atende apenas demandas trabalhistas. 
+                       OBRIGATORIAMENTE inclua a tag [BLOQUEADO] em sua resposta.
+                    3. Se FOR, confirme o entendimento em máx 2 frases.
                     """
                     st.session_state.ia_resumo_cliente = consultar_ia(p_resumo, "Assistente Jurídico Direto.")
                     st.session_state.fase = 2; st.rerun()
 
     if st.session_state.fase == 2:
         st.subheader("2. Confirmação")
-        # Exibe a resposta sem a tag interna de controle
+        # Mostra a mensagem limpando a tag de controle
         exibir_msg = st.session_state.ia_resumo_cliente.replace("[BLOQUEADO]", "").strip()
         st.info(exibir_msg)
         
+        # 🆕 Lógica de visibilidade dos botões
         bloqueado = "[BLOQUEADO]" in st.session_state.ia_resumo_cliente
         
-        col_v, col_r = st.columns(2)
-        if not bloqueado:
-            if col_v.button("✅ Confirmar e Prosseguir"): st.session_state.fase = 3; st.rerun()
-        
-        if col_r.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
+        if bloqueado:
+            # Se estiver bloqueado, mostra apenas o botão de refazer em destaque
+            if st.button("❌ Refazer"): 
+                st.session_state.fase = 1; st.rerun()
+        else:
+            # Se estiver liberado, mostra os dois botões lado a lado
+            col_v, col_r = st.columns(2)
+            if col_v.button("✅ Confirmar e Prosseguir"): 
+                st.session_state.fase = 3; st.rerun()
+            if col_r.button("❌ Refazer"): 
+                st.session_state.fase = 1; st.rerun()
 
     if st.session_state.fase == 3:
         st.subheader("3. Documentos")
-        st.markdown("""> **🔒 Privacidade:** Os arquivos enviados não serão armazenados. Nota técnica: Triagem automatizada.""")
+        st.markdown("""> **🔒 Privacidade:** Os arquivos enviados não serão armazenados.""")
         arquivo = st.file_uploader("Anexar Documento (PDF ou TXT)", type=["pdf", "txt"])
         if arquivo: 
             conteudo = ler_conteudo_arquivo(arquivo)
             st.session_state.conteudo_arquivo = conteudo
-            if "[AVISO" in conteudo:
-                st.warning(conteudo)
-            else:
-                st.success("Conteúdo do arquivo processado com sucesso.")
+            if not "[AVISO" in conteudo: st.success("Documento processado.")
         if st.button("🔽 Ir para Agendamento"): st.session_state.fase = 4; st.rerun()
 
     if st.session_state.fase == 4:
@@ -275,50 +278,24 @@ def main():
         with st.spinner("Verificando agenda..."):
             horarios = buscar_horarios_livres(service_calendar)
         if not horarios:
-            st.error("Nenhum horário disponível.")
+            st.error("Sem horários.")
         else:
             horario = st.selectbox("Escolha o Horário:", horarios)
             if st.button("✅ Confirmar Tudo"):
                 with st.spinner("Gravando..."):
                     d = st.session_state.dados_form
-                    # 🆕 ANÁLISE TÉCNICA DETALHADA PARA A PLANILHA (SÓ PARA VOCÊ)
-                    p_t = f"""
-                    Você é um PERITO TRABALHISTA SÊNIOR. 
-                    Analise para o Frederico os seguintes dados:
-                    Perfil: {d['tipo']} | Nome: {d['nome']} | Serviço: {d['servico']}
-                    Salário: {d['salario']} | Datas: {d['adm']} até {d['sai']}
-                    Relato: {d['relato']}
-                    Conteúdo extraído: {st.session_state.get('conteudo_arquivo', 'Nenhum arquivo enviado')}
-
-                    Gere um relatório técnico completo contendo:
-                    1. Pontos de atenção jurídica.
-                    2. Verbas que provavelmente serão devidas.
-                    3. Estimativa de complexidade do cálculo.
-                    4. Sugestão de próximos passos para o consultor.
-                    Seja muito detalhado e técnico.
-                    """
-                    analise_tecnica_planilha = consultar_ia(p_t, "Perito Contábil Trabalhista.")
-                    
+                    p_t = f"Gere análise técnica pericial para o Frederico sobre: {d['relato']} e arquivo {st.session_state.get('conteudo_arquivo', '')}"
+                    analise_tecnica = consultar_ia(p_t, "Perito Trabalhista.")
                     status_agenda = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
-                    
-                    sucesso = salvar_na_planilha(client_sheets, {
+                    salvar_na_planilha(client_sheets, {
                         "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'], "email": d['email'],
-                        "melhor_horario": horario, "servico": d['servico'], "texto_original": d['relato'], "analise_cliente": st.session_state.ia_resumo_cliente.replace("[BLOQUEADO]", ""), 
-                        "analise_tecnica": analise_tecnica_planilha, "status_agenda": status_agenda
+                        "melhor_horario": horario, "servico": d['servico'], "texto_original": d['relato'], "analise_cliente": exibir_msg, 
+                        "analise_tecnica": analise_tecnica, "status_agenda": status_agenda
                     })
-                    if sucesso: st.session_state.fase = 5; st.rerun()
+                    st.session_state.fase = 5; st.rerun()
 
     if st.session_state.fase == 5:
-        st.balloons()
-        st.success("✅ Solicitação enviada com sucesso!")
-        st.divider()
-        st.subheader("Obrigado por utilizar nossos serviços!")
-        st.write("Sua solicitação foi processada e o horário foi reservado em nossa agenda.")
-        col_nov, col_fec = st.columns(2)
-        if col_nov.button("🔄 Nova Consulta"):
-            st.session_state.clear(); st.rerun()
-        if col_fec.button("🚪 Sair"):
-            st.stop()
+        st.balloons(); st.success("✅ Agendado!"); st.button("🔄 Novo", on_click=lambda: st.session_state.clear())
 
 if __name__ == "__main__":
     main()
