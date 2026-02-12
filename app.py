@@ -29,33 +29,6 @@ NOME_PLANILHA_GOOGLE = 'Atendimento_Fred'
 
 # --- CALLBACKS DE FORMATAÇÃO ---
 
-def formatar_cnpj_callback():
-    val = st.session_state.cnpj_input
-    limpo = re.sub(r'\D', '', str(val))
-    if len(limpo) == 14:
-        st.session_state.cnpj_input = f"{limpo[:2]}.{limpo[2:5]}.{limpo[5:8]}/{limpo[8:12]}-{limpo[12:]}"
-
-def formatar_data_adm_callback():
-    val = st.session_state.adm_input
-    limpo = re.sub(r'\D', '', str(val))
-    if len(limpo) == 8:
-        st.session_state.adm_input = f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
-
-def formatar_data_sai_callback():
-    val = st.session_state.sai_input
-    limpo = re.sub(r'\D', '', str(val))
-    if len(limpo) == 8:
-        st.session_state.sai_input = f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
-
-def formatar_salario_callback():
-    val = st.session_state.sal_input
-    if not val: return
-    temp = val.replace("R$", "").replace(".", "").replace(",", ".").strip()
-    try:
-        valor_float = float(temp)
-        st.session_state.sal_input = f"R$ {valor_float:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    except: pass
-
 def formatar_tel_callback():
     val = st.session_state.tel_input
     limpo = re.sub(r'\D', '', str(val))
@@ -69,16 +42,12 @@ def formatar_tel_callback():
 def ler_conteudo_arquivo(uploaded_file):
     if uploaded_file is None: return ""
     try:
-        if uploaded_file.type in ["image/png", "image/jpeg", "image/jpg"]:
-            return "[AVISO: O sistema não lê texto de imagens automaticamente. Por favor, detalhe os dados no relato abaixo.]"
         if uploaded_file.type == "application/pdf":
             leitor = PyPDF2.PdfReader(uploaded_file)
             texto = "\n".join([p.extract_text() for p in leitor.pages if p.extract_text()])
-            if not texto.strip():
-                return "[AVISO: Este PDF parece ser uma imagem/digitalização sem texto extraível. Por favor, detalhe os dados no relato abaixo.]"
             return texto
         return str(uploaded_file.read(), "utf-8")
-    except: return "[Erro na leitura técnica do arquivo]"
+    except: return "[Erro na leitura do arquivo]"
 
 def conectar_google():
     try:
@@ -102,69 +71,20 @@ def consultar_ia(mensagem, sistema, temperatura=0.3):
             "temperature": temperatura
         }
         resp = requests.post(url, headers=headers, json=dados)
-        if resp.status_code != 200:
-            return f"Erro Técnico na API: {resp.status_code}"
         return resp.json()['choices'][0]['message']['content']
     except: return "IA temporariamente indisponível."
-
-def buscar_horarios_livres(service_calendar):
-    sugestoes = []
-    dia_foco = datetime.now() + timedelta(days=1)
-    while len(sugestoes) < 12:
-        if dia_foco.weekday() >= 5 or dia_foco.strftime("%d/%m") in FERIADOS_NACIONAIS:
-            dia_foco += timedelta(days=1)
-            continue
-        inicio_iso = dia_foco.replace(hour=9, minute=0, second=0).isoformat() + 'Z'
-        fim_iso = dia_foco.replace(hour=18, minute=0, second=0).isoformat() + 'Z'
-        events_result = service_calendar.events().list(
-            calendarId=ID_AGENDA, timeMin=inicio_iso, timeMax=fim_iso,
-            singleEvents=True, orderBy='startTime'
-        ).execute()
-        events = events_result.get('items', [])
-        horas_ocupadas = []
-        for event in events:
-            start = event['start'].get('dateTime', event['start'].get('date'))
-            if 'T' in start:
-                h_inicio = datetime.fromisoformat(start.replace('Z', '')).hour
-                horas_ocupadas.append(h_inicio)
-        dia_txt = f"{dia_foco.strftime('%d/%m')} ({['Seg','Ter','Qua','Qui','Sex'][dia_foco.weekday()]})"
-        for h in range(9, 18):
-            if h == 12: continue 
-            if h not in horas_ocupadas:
-                sugestoes.append(f"{dia_txt} às {h}:00")
-        dia_foco += timedelta(days=1)
-    return sugestoes[:15]
-
-def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
-    try:
-        partes = horario_texto.split(" às ")
-        data_pt = partes[0].split(" ")[0]
-        hora_pt = partes[1]
-        ano_atual = datetime.now().year
-        data_completa = datetime.strptime(f"{data_pt}/{ano_atual} {hora_pt}", "%d/%m/%Y %H:%M")
-        start_time = data_completa.isoformat()
-        end_time = (data_completa + timedelta(hours=1)).isoformat()
-        evento = {
-            'summary': f'Cálculo: {nome} ({servico})',
-            'description': f'WhatsApp: {tel}\nSolicitação via Web App Frederico.',
-            'start': {'dateTime': start_time, 'timeZone': 'America/Sao_Paulo'},
-            'end': {'dateTime': end_time, 'timeZone': 'America/Sao_Paulo'},
-        }
-        service_calendar.events().insert(calendarId=ID_AGENDA, body=evento).execute()
-        return "Agendado com Sucesso"
-    except Exception as e:
-        return f"Erro Agenda: {str(e)}"
 
 def salvar_na_planilha(client_sheets, dados):
     try:
         sh = client_sheets.open(NOME_PLANILHA_GOOGLE)
         sheet = sh.sheet1
         if not sheet.get_all_values():
-            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Email", "Horário", "Serviço", "Texto Original", "Resumo Cliente", "Análise Técnica", "Arquivo", "Status"])
+            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Horário", "Serviço", "Resposta Inicial IA", "Complemento Cliente", "Nome do Arquivo", "Análise Total Frederico", "Status Agenda"])
+        
         linha = [
-            dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], dados['email'], 
-            dados['melhor_horario'], dados['servico'], dados['texto_original'], dados['analise_cliente'], 
-            dados['analise_tecnica'], "Processado", dados['status_agenda']
+            dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], 
+            dados['melhor_horario'], dados['servico'], dados['ia_inicial'], dados['complemento_texto'], 
+            dados['nome_arquivo'], dados['analise_pericial'], dados['status_agenda']
         ]
         sheet.append_row(linha)
         return True
@@ -172,132 +92,149 @@ def salvar_na_planilha(client_sheets, dados):
         st.error(f"❌ Erro Planilha: {e}")
         return False
 
+# --- FUNÇÕES AGENDA ---
+def buscar_horarios_livres(service_calendar):
+    sugestoes = []
+    dia_foco = datetime.now() + timedelta(days=1)
+    while len(sugestoes) < 12:
+        if dia_foco.weekday() >= 5 or dia_foco.strftime("%d/%m") in FERIADOS_NACIONAIS:
+            dia_foco += timedelta(days=1); continue
+        inicio_iso = dia_foco.replace(hour=9, minute=0, second=0).isoformat() + 'Z'
+        fim_iso = dia_foco.replace(hour=18, minute=0, second=0).isoformat() + 'Z'
+        events_result = service_calendar.events().list(calendarId=ID_AGENDA, timeMin=inicio_iso, timeMax=fim_iso, singleEvents=True).execute()
+        events = events_result.get('items', [])
+        horas_ocupadas = [datetime.fromisoformat(e['start'].get('dateTime').replace('Z', '')).hour for e in events if 'dateTime' in e['start']]
+        dia_txt = f"{dia_foco.strftime('%d/%m')} ({['Seg','Ter','Qua','Qui','Sex'][dia_foco.weekday()]})"
+        for h in range(9, 18):
+            if h != 12 and h not in horas_ocupadas: sugestoes.append(f"{dia_txt} às {h}:00")
+        dia_foco += timedelta(days=1)
+    return sugestoes[:15]
+
+def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
+    try:
+        partes = horario_texto.split(" às ")
+        data_pt, hora_pt = partes[0].split(" ")[0], partes[1]
+        data_c = datetime.strptime(f"{data_pt}/{datetime.now().year} {hora_pt}", "%d/%m/%Y %H:%M")
+        evento = {
+            'summary': f'Cálculo: {nome} ({servico})',
+            'description': f'WhatsApp: {tel}',
+            'start': {'dateTime': data_c.isoformat(), 'timeZone': 'America/Sao_Paulo'},
+            'end': {'dateTime': (data_c + timedelta(hours=1)).isoformat(), 'timeZone': 'America/Sao_Paulo'},
+        }
+        service_calendar.events().insert(calendarId=ID_AGENDA, body=evento).execute()
+        return "Agendado"
+    except: return "Erro Agenda"
+
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
     if 'fase' not in st.session_state: st.session_state.fase = 1
     if 'dados_form' not in st.session_state: st.session_state.dados_form = {}
-    if 'ia_resumo_cliente' not in st.session_state: st.session_state.ia_resumo_cliente = ""
+    if 'ia_inicial' not in st.session_state: st.session_state.ia_inicial = ""
+    if 'ia_consolidada' not in st.session_state: st.session_state.ia_consolidada = ""
+    if 'complemento_texto' not in st.session_state: st.session_state.complemento_texto = "Não enviado"
+    if 'nome_arquivo' not in st.session_state: st.session_state.nome_arquivo = "Nenhum"
     if 'conteudo_arquivo' not in st.session_state: st.session_state.conteudo_arquivo = ""
 
     client_sheets, service_calendar = conectar_google()
 
-    col_logo, col_text = st.columns([1, 4])
-    with col_logo:
-        st.markdown("<h1 style='text-align: center; margin-top: 5px;'>📟</h1>", unsafe_allow_html=True)
-    with col_text:
-        st.markdown("<h1 style='margin-bottom: -15px; padding-bottom: 0;'>Frederico Novotny</h1>", unsafe_allow_html=True)
-        st.markdown("<h3 style='color: gray; margin-top: 0; padding-top: 0;'>Consultor Trabalhista</h3>", unsafe_allow_html=True)
+    st.markdown("### Frederico Novotny - Consultor Trabalhista")
     st.divider()
 
     if st.session_state.fase == 1:
-        st.subheader("1. Identificação e Caso")
-        d = st.session_state.dados_form
-        p_idx = ["Advogado", "Empresa", "Colaborador"].index(d.get("tipo", "Advogado"))
-        tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True, index=p_idx)
+        st.subheader("1. Identificação")
+        tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True)
+        nome = st.text_input("Nome/Razão Social")
+        tel = st.text_input("WhatsApp", key="tel_input", on_change=formatar_tel_callback)
+        servico = st.selectbox("Tipo de Cálculo:", ["Liquidação", "Iniciais", "Rescisão", "Horas Extras", "Outros"])
         
-        col1, col2 = st.columns(2)
-        if tipo == "Empresa":
-            nome = col1.text_input("Razão Social", value=d.get("nome", ""))
-            cnpj = col2.text_input("CNPJ", value=d.get("cnpj", ""), key="cnpj_input", on_change=formatar_cnpj_callback)
-            n_resp = st.text_input("Responsável", value=d.get("nome_resp", ""))
-        else:
-            nome = col1.text_input("Nome Completo", value=d.get("nome", ""))
-            n_resp = nome
-            cnpj = ""
-            
-        c_tel, c_mail = st.columns(2)
-        tel = c_tel.text_input("WhatsApp", value=d.get("tel", ""), key="tel_input", on_change=formatar_tel_callback)
-        mail = c_mail.text_input("E-mail", value=d.get("email", ""))
-        
-        opcoes = ["Liquidação", "Iniciais", "Impugnação", "Rescisão", "Horas Extras", "Outros"] if tipo == "Advogado" else ["Rescisão", "Horas Extras", "Outros"]
-        s_idx = opcoes.index(d.get("servico")) if d.get("servico") in opcoes else 0
-        servico = st.selectbox("Tipo de Cálculo:", opcoes, index=s_idx)
-        
-        c_adm, c_sai = st.columns(2)
-        adm = c_adm.text_input("Admissão (DDMMAAAA)", value=d.get("adm", ""), key="adm_input", on_change=formatar_data_adm_callback)
-        sai = c_sai.text_input("Saída (DDMMAAAA)", value=d.get("sai", ""), key="sai_input", on_change=formatar_data_sai_callback)
-        salario = st.text_input("Salário Base", value=d.get("salario", ""), key="sal_input", on_change=formatar_salario_callback)
-        
-        # 🆕 INCLUSÃO DA BIFURCAÇÃO DE ESCOLHA
-        st.divider()
-        st.subheader("Como deseja fornecer os detalhes do caso?")
-        metodo_detalhe = st.radio(
-            "Escolha uma opção:",
-            ["Digitar relato detalhado", "Enviar apenas documentos (Próxima tela)"],
-            horizontal=True
-        )
-
-        if metodo_detalhe == "Digitar relato detalhado":
-            relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""), help="Explique o que aconteceu.")
-        else:
-            st.info("ℹ️ Entendido. Você poderá anexar os documentos (PDF/TXT) na Fase 3 para nossa análise.")
-            relato = "[O usuário optou por enviar documentos na Fase 3]"
-
-        if st.button("💬 Analisar Solicitação"):
-            if not nome or not st.session_state.tel_input: st.warning("Preencha Nome e WhatsApp.")
+        if st.button("💬 Iniciar Análise"):
+            if not nome or not st.session_state.tel_input: st.warning("Preencha os campos.")
             else:
-                st.session_state.dados_form.update({
-                    "nome": nome, "nome_resp": n_resp, "tel": st.session_state.tel_input, "email": mail, 
-                    "cnpj": st.session_state.get("cnpj_input", ""), "tipo": tipo, "servico": servico, 
-                    "relato": relato, "salario": st.session_state.sal_input, "adm": st.session_state.adm_input, "sai": st.session_state.sai_input,
-                    "metodo": metodo_detalhe
-                })
+                st.session_state.dados_form.update({"nome": nome, "tel": st.session_state.tel_input, "tipo": tipo, "servico": servico})
                 with st.spinner("IA processando..."):
-                    p_resumo = f"""
-                    Aja como o assistente do Consultor Frederico. Usuário: {nome} | Perfil: {tipo} | Relato: '{relato}'
-                    
-                    REGRAS:
-                    1. Se o relato for de documentos, apenas saúde cordialmente (Dr. ou Sr.) e diga que aguarda os arquivos.
-                    2. Se houver relato, analise se é trabalhista. Se não for, use a tag [BLOQUEADO] e responda cordialmente que só atende trabalhista.
-                    3. Se for vago, solicite mais detalhes educadamente.
-                    """
-                    st.session_state.ia_resumo_cliente = consultar_ia(p_resumo, "Assistente Jurídico.")
+                    p = f"Saúde cordialmente {nome} ({tipo}) que busca {servico}. Seja breve."
+                    st.session_state.ia_inicial = consultar_ia(p, "Assistente Jurídico.")
                     st.session_state.fase = 2; st.rerun()
 
     if st.session_state.fase == 2:
-        st.subheader("2. Confirmação")
-        exibir_msg = st.session_state.ia_resumo_cliente.replace("[BLOQUEADO]", "").strip()
-        st.info(exibir_msg)
-        bloqueado = "[BLOQUEADO]" in st.session_state.ia_resumo_cliente
-        if bloqueado:
-            if st.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
+        st.subheader("2. Complemento de Informações")
+        st.info(st.session_state.ia_inicial)
+        
+        # 🆕 AVISO DE PRIVACIDADE E LGPD
+        st.warning("🔒 **Compromisso com sua Privacidade (LGPD):** Os documentos enviados não serão salvos em nossos bancos de dados. Eles serão utilizados exclusivamente para esta análise inicial e descartados em seguida.")
+
+        metodo = st.radio("Deseja detalhar seu caso?", ["Sim, digitar relato agora", "Vou anexar documentos para a IA ler"], horizontal=True)
+
+        if metodo == "Sim, digitar relato agora":
+            relato_user = st.text_area("Descreva os detalhes aqui:")
+            if st.button("Salvar Detalhes"):
+                st.session_state.complemento_texto = relato_user
+                st.success("Informações recebidas!")
         else:
-            col_v, col_r = st.columns(2)
-            if col_v.button("✅ Confirmar e Prosseguir"): st.session_state.fase = 3; st.rerun()
-            if col_r.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
+            st.info("ℹ️ Selecione a opção abaixo e anexe os arquivos na próxima tela. A IA fará a interpretação automática para você.")
+
+        if st.button("✅ Prosseguir"):
+            st.session_state.fase = 3; st.rerun()
 
     if st.session_state.fase == 3:
-        st.subheader("3. Documentos")
-        st.markdown("""> **🔒 Privacidade:** Os arquivos enviados não serão armazenados.""")
-        arquivo = st.file_uploader("Anexar Documento (PDF ou TXT)", type=["pdf", "txt"])
+        st.subheader("3. Análise de Documentos")
+        arquivo = st.file_uploader("Anexar PDF ou TXT", type=["pdf", "txt"])
+        
         if arquivo: 
-            conteudo = ler_conteudo_arquivo(arquivo)
-            st.session_state.conteudo_arquivo = conteudo
-            if not "[AVISO" in conteudo: st.success("Documento processado com sucesso.")
-        if st.button("🔽 Ir para Agendamento"): st.session_state.fase = 4; st.rerun()
+            st.session_state.nome_arquivo = arquivo.name
+            st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo)
+            
+            # 🆕 IA INTERPRETA O ARQUIVO E PEDE BREVE RELATO
+            with st.spinner("IA interpretando arquivo..."):
+                p_interp = f"Interprete brevemente este documento: {st.session_state.conteudo_arquivo[:2000]}. Diga ao usuário o que você identificou e peça que ele escreva abaixo um breve relato do que ele precisa especificamente sobre este arquivo."
+                interpretacao = consultar_ia(p_interp, "Assistente Jurídico.")
+                st.chat_message("assistant").write(interpretacao)
+                
+                relato_sobre_doc = st.text_area("Seu relato sobre este documento:", key="relato_doc")
+                if st.button("Consolidar Informações"):
+                    st.session_state.complemento_texto = relato_sobre_doc
+                    with st.spinner("Consolidando..."):
+                        p_cons = f"O usuário enviou o arquivo {arquivo.name} e disse: {relato_user if 'relato_user' in locals() else relato_doc}. Traga um entendimento superficial e cordial para o usuário, mostrando que entendeu o pedido."
+                        st.session_state.ia_consolidada = consultar_ia(p_cons, "Assistente Jurídico.")
+                        st.info(st.session_state.ia_consolidada)
+        
+        if st.button("🗓️ Ir para Agendamento"): st.session_state.fase = 4; st.rerun()
 
     if st.session_state.fase == 4:
-        st.subheader("🗓️ Finalizar")
-        with st.spinner("Verificando agenda..."):
-            horarios = buscar_horarios_livres(service_calendar)
-        if not horarios: st.error("Sem horários.")
-        else:
-            horario = st.selectbox("Escolha o Horário:", horarios)
-            if st.button("✅ Confirmar Tudo"):
-                with st.spinner("Gravando..."):
-                    d = st.session_state.dados_form
-                    p_t = f"Gere análise técnica para Frederico: Relato: {d['relato']} | Doc: {st.session_state.get('conteudo_arquivo', '')}"
-                    analise_tecnica = consultar_ia(p_t, "Perito Trabalhista.")
-                    status_agenda = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
-                    salvar_na_planilha(client_sheets, {
-                        "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'], "email": d['email'],
-                        "melhor_horario": horario, "servico": d['servico'], "texto_original": d['relato'], "analise_cliente": exibir_msg, 
-                        "analise_tecnica": analise_tecnica, "status_agenda": status_agenda
-                    })
-                    st.session_state.fase = 5; st.rerun()
+        st.subheader("4. Agendamento Final")
+        horarios = buscar_horarios_livres(service_calendar)
+        horario = st.selectbox("Escolha o Horário:", horarios)
+        
+        if st.button("✅ Finalizar"):
+            with st.spinner("Gerando Dossiê Frederico..."):
+                d = st.session_state.dados_form
+                # 🆕 ANÁLISE COMPLETA PARA O FREDERICO
+                p_pericial = f"""
+                Você é o Perito do Frederico.
+                DADOS: Cliente {d['nome']}, Serviço {d['servico']}.
+                RELATO: {st.session_state.complemento_texto}
+                DOCUMENTO: {st.session_state.conteudo_arquivo}
+                
+                TAREFA: Gere uma análise profunda e técnica. Identifique verbas, riscos, inconsistências entre relato e doc, e complexidade do cálculo.
+                """
+                analise_total_fred = consultar_ia(p_pericial, "Perito Trabalhista Sênior.")
+                
+                status_agenda = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
+                
+                salvar_na_planilha(client_sheets, {
+                    "data_hora": datetime.now().strftime("%d/%m %H:%M"), 
+                    "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'],
+                    "melhor_horario": horario, "servico": d['servico'], 
+                    "ia_inicial": st.session_state.ia_inicial,
+                    "complemento_texto": st.session_state.complemento_texto,
+                    "nome_arquivo": st.session_state.nome_arquivo, 
+                    "analise_pericial": analise_total_fred, 
+                    "status_agenda": status_agenda
+                })
+                st.session_state.fase = 5; st.rerun()
 
     if st.session_state.fase == 5:
-        st.balloons(); st.success("✅ Agendado!"); st.button("🔄 Novo", on_click=lambda: st.session_state.clear())
+        st.balloons(); st.success("✅ Tudo pronto! Frederico recebeu sua análise e aguarda você no horário marcado."); st.button("🔄 Novo", on_click=lambda: st.session_state.clear())
 
 if __name__ == "__main__":
     main()
