@@ -175,42 +175,58 @@ def main():
 
     if st.session_state.fase == 1:
         st.subheader("1. Identificação e Caso")
-        tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True)
+        d = st.session_state.dados_form # Atalho para legibilidade
+        
+        tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True, 
+                        index=["Advogado", "Empresa", "Colaborador"].index(d.get("tipo", "Advogado")))
         
         col1, col2 = st.columns(2)
         if tipo == "Empresa":
-            nome = col1.text_input("Razão Social")
-            cnpj = col2.text_input("CNPJ", key="cnpj_input", on_change=formatar_cnpj_callback, placeholder="00.000.000/0000-00")
-            resp = st.text_input("Nome do Responsável")
-            email = st.text_input("E-mail para contato")
-            tel = st.text_input("WhatsApp (Responsável)", key="tel_input", on_change=formatar_tel_callback)
+            nome = col1.text_input("Razão Social", value=d.get("nome", ""))
+            cnpj = col2.text_input("CNPJ", key="cnpj_input", on_change=formatar_cnpj_callback, 
+                                   placeholder="00.000.000/0000-00", value=d.get("cnpj", ""))
+            resp = st.text_input("Nome do Responsável", value=d.get("resp", ""))
+            email = st.text_input("E-mail para contato", value=d.get("email", ""))
+            tel = st.text_input("WhatsApp (Responsável)", key="tel_input", on_change=formatar_tel_callback, value=d.get("tel", ""))
         else:
-            nome = col1.text_input("Nome Completo")
-            email = col2.text_input("E-mail")
-            tel = st.text_input("WhatsApp", key="tel_input", on_change=formatar_tel_callback)
+            nome = col1.text_input("Nome Completo", value=d.get("nome", ""))
+            email = col2.text_input("E-mail", value=d.get("email", ""))
+            tel = st.text_input("WhatsApp", key="tel_input", on_change=formatar_tel_callback, value=d.get("tel", ""))
             cnpj = ""
             resp = nome
         
         opcoes_servico = ["Liquidação", "Iniciais", "Impugnação", "Rescisão", "Horas Extras", "Outros"] if tipo == "Advogado" else ["Rescisão", "Horas Extras", "Outros"]
-        servico = st.selectbox("Serviço:", opcoes_servico)
+        # Garante que o index do selectbox não quebre se mudar de perfil
+        s_idx = opcoes_servico.index(d.get("servico")) if d.get("servico") in opcoes_servico else 0
+        servico = st.selectbox("Serviço:", opcoes_servico, index=s_idx)
         
         c_adm, c_sai = st.columns(2)
-        adm = c_adm.text_input("Admissão (DDMMAAAA)", key="adm_input", on_change=formatar_data_adm_callback)
-        sai = c_sai.text_input("Saída (DDMMAAAA)", key="sai_input", on_change=formatar_data_sai_callback)
-        salario = st.text_input("Salário Base", key="sal_input", on_change=formatar_salario_callback)
-        relato = st.text_area("Resumo da Demanda:")
+        adm = c_adm.text_input("Admissão (DDMMAAAA)", key="adm_input", on_change=formatar_data_adm_callback, value=d.get("adm", ""))
+        sai = c_sai.text_input("Saída (DDMMAAAA)", key="sai_input", on_change=formatar_data_sai_callback, value=d.get("sai", ""))
+        salario = st.text_input("Salário Base", key="sal_input", on_change=formatar_salario_callback, value=d.get("salario", ""))
+        relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""))
 
         if st.button("💬 Analisar Solicitação"):
             cnpj_limpo = re.sub(r'\D', '', cnpj)
-            if not nome or not st.session_state.tel_input: 
+            if not nome or not tel: 
                 st.warning("Preencha o Nome/Razão Social e WhatsApp.")
             elif tipo == "Empresa" and len(cnpj_limpo) != 14:
                 st.error("Por favor, informe um CNPJ válido com 14 dígitos.")
             else:
-                st.session_state.dados_form.update({"nome": nome, "resp": resp, "tel": st.session_state.tel_input, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico, "adm": st.session_state.adm_input, "sai": st.session_state.sai_input, "salario": st.session_state.sal_input, "relato": relato})
+                st.session_state.dados_form.update({"nome": nome, "resp": resp, "tel": tel, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico, "adm": adm, "sai": sai, "salario": salario, "relato": relato})
                 with st.spinner("Analisando..."):
-                    p_resumo = f"Usuário {nome} ({tipo}) solicita {servico}. Relato: '{relato}'. Datas: {st.session_state.adm_input} a {st.session_state.sai_input}. Salário: {st.session_state.sal_input}. Responda apenas confirmando o entendimento cordial e solicite complemento se estiver vago."
-                    st.session_state.ia_inicial = consultar_ia(p_resumo, "Assistente do Frederico")
+                    p_resumo = f"""
+                    Você é o assistente direto do Consultor Frederico. 
+                    Usuário: {nome} | Perfil: {tipo} | Serviço: {servico}
+                    Dados preenchidos: Admissão {adm}, Saída {sai}, Salário {salario}.
+                    Relato: '{relato}'
+
+                    REGRAS:
+                    1. Use obrigatoriamente 'Dr./Dra. {nome}' para Advogados ou 'Sr./Sra. {nome}' para Empresa/Colaborador.
+                    2. NÃO descreva seu raciocínio. Comece direto na saudação.
+                    3. Confirme que entendeu a demanda e se faltar algo essencial (não preenchido acima), peça educadamente.
+                    """
+                    st.session_state.ia_inicial = consultar_ia(p_resumo, "Assistente Jurídico.")
                     st.session_state.fase = 2; st.rerun()
 
     if st.session_state.fase == 2:
@@ -219,19 +235,20 @@ def main():
         opcao = st.radio("Deseja complementar?", ["Apenas seguir para agendamento", "Digitar relato complementar", "Enviar documentos"], horizontal=True)
         
         if opcao == "Digitar relato complementar":
-            rel_comp = st.text_area("Complemento:")
+            rel_comp = st.text_area("Complemento:", value=st.session_state.relato_complementar if st.session_state.relato_complementar != "Não enviado" else "")
             if st.button("Analisar Novo Relato"):
                 st.session_state.relato_complementar = rel_comp
                 with st.spinner("Reavaliando..."):
-                    st.session_state.ia_resposta_complementar = consultar_ia(f"Novo relato: {rel_comp}. Responda se entendeu sucintamente.", "Assistente")
+                    p_comp = f"O usuário complementou: {rel_comp}. Responda se entendeu usando o tratamento correto."
+                    st.session_state.ia_resposta_complementar = consultar_ia(p_comp, "Assistente Jurídico")
                     st.rerun()
         elif opcao == "Enviar documentos":
-            st.markdown("<div style='background-color: #f0f2f6; padding: 10px;'>🔒 **Privacidade (LGPD):** Os arquivos são apenas para análise técnica e não serão gravados permanentemente.</div>", unsafe_allow_html=True)
+            st.markdown("<div style='background-color: #f0f2f6; padding: 10px;'>🔒 **Privacidade (LGPD):** Arquivos usados apenas para análise técnica e não gravados permanentemente.</div>", unsafe_allow_html=True)
             arquivo = st.file_uploader("Anexar PDF", type=["pdf"])
             if arquivo:
                 st.session_state.nome_arquivo = arquivo.name
                 st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo)
-                st.success("Arquivo pronto para análise.")
+                st.success(f"Arquivo {arquivo.name} pronto para análise.")
 
         col_v, col_r = st.columns(2)
         if col_v.button("✅ Confirmar e Ir para Agenda"): st.session_state.fase = 4; st.rerun()
@@ -247,11 +264,11 @@ def main():
                 p_fred = f"PERITO: Analise INTEGRALMENTE: Relato 1: {d['relato']} | Relato 2: {st.session_state.relato_complementar} | Conteúdo Doc: {st.session_state.conteudo_arquivo}. Forneça ao Fred: grau de dificuldade, verbas envolvidas, valor sugerido e riscos."
                 analise_profunda = consultar_ia(p_fred, "Perito Contábil Sênior")
                 status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
-                salvar_na_planilha(client_sheets, {"data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "resp": d.get('resp', ''), "telefone": d['tel'], "email": d['email'], "cnpj": d.get('cnpj', ''), "melhor_horario": horario, "servico": d['servico'], "relato_inicial": d['relato'], "ia_inicial": st.session_state.ia_inicial, "complemento_relato": st.session_state.relato_complementar, "ia_resposta_complementar": st.session_state.ia_resposta_complementar, "nome_arquivo": st.session_state.nome_arquivo, "analise_profunda": analise_profunda, "status_agenda": status})
+                salvar_na_planilha(client_sheets, {**d, "data_hora": datetime.now().strftime("%d/%m %H:%M"), "melhor_horario": horario, "relato_inicial": d['relato'], "ia_inicial": st.session_state.ia_inicial, "complemento_relato": st.session_state.relato_complementar, "ia_resposta_complementar": st.session_state.ia_resposta_complementar, "nome_arquivo": st.session_state.nome_arquivo, "analise_profunda": analise_profunda, "status_agenda": status, "tipo_usuario": d['tipo'], "telefone": d['tel']})
                 st.session_state.fase = 5; st.rerun()
 
     if st.session_state.fase == 5:
-        st.balloons(); st.success("✅ Solicitação enviada com sucesso!"); st.button("🔄 Novo", on_click=lambda: st.session_state.clear())
+        st.balloons(); st.success("✅ Tudo pronto!"); st.button("🔄 Novo Atendimento", on_click=lambda: st.session_state.clear())
 
 if __name__ == "__main__":
     main()
