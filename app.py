@@ -175,7 +175,7 @@ def main():
 
     if st.session_state.fase == 1:
         st.subheader("1. Identificação e Caso")
-        d = st.session_state.dados_form # Atalho para legibilidade
+        d = st.session_state.dados_form 
         
         tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True, 
                         index=["Advogado", "Empresa", "Colaborador"].index(d.get("tipo", "Advogado")))
@@ -196,7 +196,6 @@ def main():
             resp = nome
         
         opcoes_servico = ["Liquidação", "Iniciais", "Impugnação", "Rescisão", "Horas Extras", "Outros"] if tipo == "Advogado" else ["Rescisão", "Horas Extras", "Outros"]
-        # Garante que o index do selectbox não quebre se mudar de perfil
         s_idx = opcoes_servico.index(d.get("servico")) if d.get("servico") in opcoes_servico else 0
         servico = st.selectbox("Serviço:", opcoes_servico, index=s_idx)
         
@@ -215,18 +214,20 @@ def main():
             else:
                 st.session_state.dados_form.update({"nome": nome, "resp": resp, "tel": tel, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico, "adm": adm, "sai": sai, "salario": salario, "relato": relato})
                 with st.spinner("Analisando..."):
+                    # Prompt atualizado para cumprimentar conforme o perfil
                     p_resumo = f"""
                     Você é o assistente direto do Consultor Frederico. 
                     Usuário: {nome} | Perfil: {tipo} | Serviço: {servico}
                     Dados preenchidos: Admissão {adm}, Saída {sai}, Salário {salario}.
                     Relato: '{relato}'
 
-                    REGRAS:
-                    1. Use obrigatoriamente 'Dr./Dra. {nome}' para Advogados ou 'Sr./Sra. {nome}' para Empresa/Colaborador.
-                    2. NÃO descreva seu raciocínio. Comece direto na saudação.
-                    3. Confirme que entendeu a demanda e se faltar algo essencial (não preenchido acima), peça educadamente.
+                    REGRAS DE RESPOSTA:
+                    1. CUMPRIMENTE O USUÁRIO: Se for Advogado, use 'Dr.' ou 'Dra.' conforme o nome {nome}. Para Empresa ou Colaborador, use 'Sr.' ou 'Sra.' conforme o nome {nome}.
+                    2. NÃO descreva seu raciocínio interno. Comece direto na saudação.
+                    3. Confirme que entendeu a demanda de forma cordial.
+                    4. Se faltar algo essencial, peça educadamente.
                     """
-                    st.session_state.ia_inicial = consultar_ia(p_resumo, "Assistente Jurídico.")
+                    st.session_state.ia_inicial = consultar_ia(p_resumo, "Assistente Jurídico Objetivo.")
                     st.session_state.fase = 2; st.rerun()
 
     if st.session_state.fase == 2:
@@ -239,8 +240,9 @@ def main():
             if st.button("Analisar Novo Relato"):
                 st.session_state.relato_complementar = rel_comp
                 with st.spinner("Reavaliando..."):
-                    p_comp = f"O usuário complementou: {rel_comp}. Responda se entendeu usando o tratamento correto."
-                    st.session_state.ia_resposta_complementar = consultar_ia(p_comp, "Assistente Jurídico")
+                    # IA mantém o tratamento no complemento
+                    p_comp = f"O usuário {st.session_state.dados_form['nome']} ({st.session_state.dados_form['tipo']}) complementou: {rel_comp}. Responda se entendeu usando o tratamento Dr/Dra ou Sr/Sra."
+                    st.session_state.ia_resposta_complementar = consultar_ia(p_comp, "Assistente Jurídico.")
                     st.rerun()
         elif opcao == "Enviar documentos":
             st.markdown("<div style='background-color: #f0f2f6; padding: 10px;'>🔒 **Privacidade (LGPD):** Arquivos usados apenas para análise técnica e não gravados permanentemente.</div>", unsafe_allow_html=True)
