@@ -229,61 +229,43 @@ def main():
                     "relato": relato, "salario": st.session_state.sal_input, "adm": st.session_state.adm_input, "sai": st.session_state.sai_input
                 })
                 with st.spinner("IA processando..."):
-                    msg_bloqueio = "A IA só está programada para atender sobre cálculos trabalhistas ou demandas da área."
-                    
-                    # 🆕 PROMPT SILENCIOSO: Impede a IA de explicar o que está fazendo
                     p_resumo = f"""
                     Aja como o assistente do Consultor Frederico. 
-                    Usuário: {nome} | Perfil: {tipo} | Caso: '{relato}'
+                    Usuário: {nome} | Perfil: {tipo} | Relato: '{relato}'
                     
-                    INSTRUÇÕES TÉCNICAS (NÃO REPITA ISSO PARA O CLIENTE):
-                    1. Identifique o gênero por {nome}.
-                    2. Perfil 'Advogado' -> Saudação: 'Doutor' ou 'Doutora' {nome}.
-                    3. Outros Perfis -> Saudação: 'Sr.' ou 'Sra.' {nome}.
+                    REGRAS DE FILTRO E RESPOSTA:
+                    1. Verifique se o assunto é sobre cálculos ou demandas trabalhistas.
+                    2. Se NÃO for trabalhista, responda de forma CORDIAL mas firme, variando a frase, mas sempre dizendo que o sistema foi programado exclusivamente para atendimentos trabalhistas e de cálculos.
+                    3. Se FOR trabalhista, confirme o entendimento com saudação Dr(a). ou Sr(a). em máx 2 frases.
                     
-                    REGRAS DE RESPOSTA:
-                    - Comece a resposta DIRETAMENTE pela saudação.
-                    - NUNCA mencione "instruções", "regras", "gênero" ou seu processo de decisão.
-                    - Se não for trabalhista, responda apenas: '{msg_bloqueio}'.
-                    - Se for trabalhista, confirme objetivamente o caso em no máximo 2 frases curtas.
+                    IMPORTANTE: Se o assunto for proibido, inclua a palavra '[BLOQUEADO]' no final da sua resposta (isso não aparecerá para o cliente).
                     """
-                    st.session_state.ia_resumo_cliente = consultar_ia(p_resumo, "Você é um assistente jurídico direto e profissional.")
+                    st.session_state.ia_resumo_cliente = consultar_ia(p_resumo, "Assistente Jurídico Direto.")
                     st.session_state.fase = 2; st.rerun()
 
     if st.session_state.fase == 2:
         st.subheader("2. Confirmação")
-        st.info(st.session_state.ia_resumo_cliente)
+        # Exibe a resposta sem a tag interna de controle
+        exibir_msg = st.session_state.ia_resumo_cliente.replace("[BLOQUEADO]", "").strip()
+        st.info(exibir_msg)
         
-        d = st.session_state.dados_form
-        with st.expander("📝 Ver resumo dos dados informados", expanded=False):
-            st.write(f"**Nome:** {d['nome']}")
-            st.write(f"**Serviço:** {d['servico']}")
-            st.write(f"**Salário:** {d['salario']}")
-            st.write(f"**Relato:** {d['relato']}")
+        bloqueado = "[BLOQUEADO]" in st.session_state.ia_resumo_cliente
         
-        bloqueado = "A IA só está programada para atender" in st.session_state.ia_resumo_cliente
         col_v, col_r = st.columns(2)
         if not bloqueado:
             if col_v.button("✅ Confirmar e Prosseguir"): st.session_state.fase = 3; st.rerun()
+        
         if col_r.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
 
     if st.session_state.fase == 3:
         st.subheader("3. Documentos")
-        st.markdown("""
-        > **Por favor, envie os arquivos necessários para o seu cálculo.**
-        > 
-        > 🔒 **Privacidade:** Os arquivos enviados **não serão armazenados** permanentemente em nosso sistema. Eles serão utilizados apenas para auxiliar na análise inicial da IA.
-        > 
-        > ⚠️ **Nota:** Esta é uma triagem automatizada. Qualquer detalhe mais técnico ou específico deverá ser tratado diretamente com o **Consultor Frederico**.
-        """)
+        st.markdown("""> **🔒 Privacidade:** Os arquivos enviados não serão armazenados. Nota técnica: Triagem automatizada.""")
         arquivo = st.file_uploader("Anexar Documento (PDF ou TXT)", type=["pdf", "txt"])
         if arquivo: 
             conteudo = ler_conteudo_arquivo(arquivo)
             st.session_state.conteudo_arquivo = conteudo
             if "[AVISO" in conteudo:
                 st.warning(conteudo)
-                with st.expander("📝 Seu Relato da Fase anterior", expanded=True):
-                    st.write(st.session_state.dados_form.get("relato", ""))
             else:
                 st.success("Conteúdo do arquivo processado com sucesso.")
         if st.button("🔽 Ir para Agendamento"): st.session_state.fase = 4; st.rerun()
@@ -299,19 +281,30 @@ def main():
             if st.button("✅ Confirmar Tudo"):
                 with st.spinner("Gravando..."):
                     d = st.session_state.dados_form
+                    # 🆕 ANÁLISE TÉCNICA DETALHADA PARA A PLANILHA (SÓ PARA VOCÊ)
                     p_t = f"""
-                    Analise a demanda completa: Perfil {d['tipo']}, Serviço {d['servico']}, Salário {d['salario']}.
-                    Relato do usuário: {d['relato']}.
-                    Conteúdo dos arquivos: {st.session_state.get('conteudo_arquivo', 'Nenhum arquivo enviado')}.
-                    Forneça uma análise técnica detalhada, sugira valores e avalie a dificuldade.
+                    Você é um PERITO TRABALHISTA SÊNIOR. 
+                    Analise para o Frederico os seguintes dados:
+                    Perfil: {d['tipo']} | Nome: {d['nome']} | Serviço: {d['servico']}
+                    Salário: {d['salario']} | Datas: {d['adm']} até {d['sai']}
+                    Relato: {d['relato']}
+                    Conteúdo extraído: {st.session_state.get('conteudo_arquivo', 'Nenhum arquivo enviado')}
+
+                    Gere um relatório técnico completo contendo:
+                    1. Pontos de atenção jurídica.
+                    2. Verbas que provavelmente serão devidas.
+                    3. Estimativa de complexidade do cálculo.
+                    4. Sugestão de próximos passos para o consultor.
+                    Seja muito detalhado e técnico.
                     """
-                    analise_ia = consultar_ia(p_t, "Perito Judicial")
+                    analise_tecnica_planilha = consultar_ia(p_t, "Perito Contábil Trabalhista.")
+                    
                     status_agenda = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                     
                     sucesso = salvar_na_planilha(client_sheets, {
                         "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'], "email": d['email'],
-                        "melhor_horario": horario, "servico": d['servico'], "texto_original": d['relato'], "analise_cliente": st.session_state.ia_resumo_cliente, 
-                        "analise_tecnica": analise_ia, "status_agenda": status_agenda
+                        "melhor_horario": horario, "servico": d['servico'], "texto_original": d['relato'], "analise_cliente": st.session_state.ia_resumo_cliente.replace("[BLOQUEADO]", ""), 
+                        "analise_tecnica": analise_tecnica_planilha, "status_agenda": status_agenda
                     })
                     if sucesso: st.session_state.fase = 5; st.rerun()
 
