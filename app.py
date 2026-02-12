@@ -12,7 +12,6 @@ from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 
 # --- 🚨 CONFIGURAÇÕES 🚨 ---
-# 🆕 Chave atualizada com sucesso
 MINHA_CHAVE = "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"
 ID_AGENDA = "a497481e5251098078e6c68882a849680f499f6cef836ab976ffccdaad87689a@group.calendar.google.com"
 
@@ -93,26 +92,20 @@ def conectar_google():
         st.error(f"❌ Erro de Conexão Google: {e}")
         return None, None
 
-def consultar_ia(mensagem, sistema, temperatura=0.5):
+def consultar_ia(mensagem, sistema, temperatura=0.3):
     try:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {MINHA_CHAVE}", "Content-Type": "application/json"}
-        
-        # Modelo atualizado e estável
         dados = {
             "model": "llama-3.1-8b-instant", 
             "messages": [{"role": "system", "content": sistema}, {"role": "user", "content": mensagem}], 
             "temperature": temperatura
         }
-        
         resp = requests.post(url, headers=headers, json=dados)
-        
         if resp.status_code != 200:
-            return f"Erro Técnico na API: {resp.status_code} - Verifique a validade da chave."
-            
+            return f"Erro Técnico na API: {resp.status_code}"
         return resp.json()['choices'][0]['message']['content']
-    except Exception as e: 
-        return f"Erro de Conexão: {str(e)}"
+    except: return "IA temporariamente indisponível."
 
 def buscar_horarios_livres(service_calendar):
     sugestoes = []
@@ -188,7 +181,6 @@ def main():
 
     client_sheets, service_calendar = conectar_google()
 
-    # Cabeçalho Visual Destaque
     col_logo, col_text = st.columns([1, 4])
     with col_logo:
         st.markdown("<h1 style='text-align: center; margin-top: 5px;'>📟</h1>", unsafe_allow_html=True)
@@ -238,26 +230,30 @@ def main():
                 })
                 with st.spinner("IA processando..."):
                     msg_bloqueio = "A IA só está programada para atender sobre cálculos trabalhistas ou demandas da área."
+                    
+                    # 🆕 PROMPT SILENCIOSO: Impede a IA de explicar o que está fazendo
                     p_resumo = f"""
-                    O usuário se chama {nome}. O perfil selecionado é {tipo}. O relato é: '{relato}'.
+                    Aja como o assistente do Consultor Frederico. 
+                    Usuário: {nome} | Perfil: {tipo} | Caso: '{relato}'
                     
-                    REGRAS DE TRATAMENTO (OBRIGATÓRIO):
-                    1. Identifique o gênero do usuário pelo nome: {nome}.
-                    2. SE o perfil for 'Advogado', trate EXCLUSIVAMENTE por 'Doutor' ou 'Doutora'. Nunca use Sr. ou Sra.
-                    3. SE o perfil for 'Empresa' ou 'Colaborador', trate por 'Sr.' ou 'Sra.'.
+                    INSTRUÇÕES TÉCNICAS (NÃO REPITA ISSO PARA O CLIENTE):
+                    1. Identifique o gênero por {nome}.
+                    2. Perfil 'Advogado' -> Saudação: 'Doutor' ou 'Doutora' {nome}.
+                    3. Outros Perfis -> Saudação: 'Sr.' ou 'Sra.' {nome}.
                     
-                    REGRAS DE CONTEÚDO:
-                    1. Se o relato NÃO for sobre cálculos trabalhistas ou área trabalhista, responda APENAS: '{msg_bloqueio}'.
-                    2. Se for da área, confirme objetivamente que entendeu e cite o objetivo principal. Máximo 2 frases.
+                    REGRAS DE RESPOSTA:
+                    - Comece a resposta DIRETAMENTE pela saudação.
+                    - NUNCA mencione "instruções", "regras", "gênero" ou seu processo de decisão.
+                    - Se não for trabalhista, responda apenas: '{msg_bloqueio}'.
+                    - Se for trabalhista, confirme objetivamente o caso em no máximo 2 frases curtas.
                     """
-                    st.session_state.ia_resumo_cliente = consultar_ia(p_resumo, "Consultor Jurídico")
+                    st.session_state.ia_resumo_cliente = consultar_ia(p_resumo, "Você é um assistente jurídico direto e profissional.")
                     st.session_state.fase = 2; st.rerun()
 
     if st.session_state.fase == 2:
         st.subheader("2. Confirmação")
         st.info(st.session_state.ia_resumo_cliente)
         
-        # Resumo dos dados informados
         d = st.session_state.dados_form
         with st.expander("📝 Ver resumo dos dados informados", expanded=False):
             st.write(f"**Nome:** {d['nome']}")
@@ -266,12 +262,9 @@ def main():
             st.write(f"**Relato:** {d['relato']}")
         
         bloqueado = "A IA só está programada para atender" in st.session_state.ia_resumo_cliente
-        erro = "Erro Técnico" in st.session_state.ia_resumo_cliente
-
         col_v, col_r = st.columns(2)
-        if not bloqueado and not erro:
-            if col_v.button("✅ Confirmar e Prosseguir"): 
-                st.session_state.fase = 3; st.rerun()
+        if not bloqueado:
+            if col_v.button("✅ Confirmar e Prosseguir"): st.session_state.fase = 3; st.rerun()
         if col_r.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
 
     if st.session_state.fase == 3:
