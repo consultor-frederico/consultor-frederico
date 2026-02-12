@@ -150,9 +150,9 @@ def salvar_na_planilha(client_sheets, dados):
         sh = client_sheets.open(NOME_PLANILHA_GOOGLE)
         sheet = sh.sheet1
         if not sheet.get_all_values():
-            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Horário", "Serviço", "Resposta Inicial IA", "Complemento Relato", "Nome do Arquivo", "Análise Profunda IA", "Status"])
+            sheet.append_row(["Data", "Tipo", "Nome/Razão", "Contato", "Email", "CNPJ", "Horário", "Serviço", "Resposta Inicial IA", "Complemento Relato", "Nome do Arquivo", "Análise Profunda IA", "Status"])
         linha = [
-            dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], 
+            dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], dados['email'], dados.get('cnpj', ''),
             dados['melhor_horario'], dados['servico'], dados['ia_inicial'], 
             dados['complemento_relato'], dados['nome_arquivo'], dados['analise_profunda'], dados['status_agenda']
         ]
@@ -185,11 +185,19 @@ def main():
         tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True)
         
         col1, col2 = st.columns(2)
-        nome = col1.text_input("Nome/Razão Social")
-        cnpj = col2.text_input("CNPJ", key="cnpj_input", on_change=formatar_cnpj_callback)
-        tel = st.text_input("WhatsApp", key="tel_input", on_change=formatar_tel_callback)
         
-        # 🆕 LÓGICA DE FILTRO DE OPÇÕES POR PERFIL
+        # 🆕 LÓGICA DE CAMPOS POR PERFIL (SOLICITADO)
+        if tipo == "Empresa":
+            nome = col1.text_input("Razão Social")
+            cnpj = col2.text_input("CNPJ", key="cnpj_input", on_change=formatar_cnpj_callback)
+            email = st.text_input("E-mail para contato")
+            tel = st.text_input("WhatsApp (Responsável)", key="tel_input", on_change=formatar_tel_callback)
+        else:
+            nome = col1.text_input("Nome Completo")
+            email = col2.text_input("E-mail")
+            tel = st.text_input("WhatsApp", key="tel_input", on_change=formatar_tel_callback)
+            cnpj = ""
+        
         if tipo == "Advogado":
             opcoes_servico = ["Liquidação", "Iniciais", "Impugnação", "Rescisão", "Horas Extras", "Outros"]
         else:
@@ -208,7 +216,7 @@ def main():
             if not nome or not st.session_state.tel_input: st.warning("Preencha Nome e WhatsApp.")
             else:
                 st.session_state.dados_form.update({
-                    "nome": nome, "tel": st.session_state.tel_input, "tipo": tipo, "servico": servico,
+                    "nome": nome, "tel": st.session_state.tel_input, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico,
                     "adm": st.session_state.adm_input, "sai": st.session_state.sai_input, "salario": st.session_state.sal_input, "relato": relato
                 })
                 with st.spinner("Analisando..."):
@@ -268,7 +276,7 @@ def main():
                 
                 status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                 salvar_na_planilha(client_sheets, {
-                    "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'],
+                    "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'], "email": d['email'], "cnpj": d.get('cnpj', ''),
                     "melhor_horario": horario, "servico": d['servico'], "ia_inicial": st.session_state.ia_inicial,
                     "complemento_relato": st.session_state.relato_complementar, "nome_arquivo": st.session_state.nome_arquivo,
                     "analise_profunda": analise_profunda, "status_agenda": status
@@ -276,7 +284,7 @@ def main():
                 st.session_state.fase = 5; st.rerun()
 
     if st.session_state.fase == 5:
-        st.balloons(); st.success("✅ Tudo pronto!"); st.button("🔄 Novo", on_click=lambda: st.session_state.clear())
+        st.balloons(); st.success("✅ Tudo pronto!"); st.button("🔄 Novo Atendimento", on_click=lambda: st.session_state.clear())
 
 if __name__ == "__main__":
     main()
