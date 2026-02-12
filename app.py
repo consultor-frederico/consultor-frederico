@@ -150,9 +150,9 @@ def salvar_na_planilha(client_sheets, dados):
         sh = client_sheets.open(NOME_PLANILHA_GOOGLE)
         sheet = sh.sheet1
         if not sheet.get_all_values():
-            sheet.append_row(["Data", "Tipo", "Nome/Razão", "Contato", "Email", "CNPJ", "Horário", "Serviço", "Resposta Inicial IA", "Complemento Relato", "Nome do Arquivo", "Análise Profunda IA", "Status"])
+            sheet.append_row(["Data", "Tipo", "Nome/Razão", "Responsável", "Contato", "Email", "CNPJ", "Horário", "Serviço", "Resposta Inicial IA", "Complemento Relato", "Nome do Arquivo", "Análise Profunda IA", "Status"])
         linha = [
-            dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], dados['email'], dados.get('cnpj', ''),
+            dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados.get('resp', ''), dados['telefone'], dados['email'], dados.get('cnpj', ''),
             dados['melhor_horario'], dados['servico'], dados['ia_inicial'], 
             dados['complemento_relato'], dados['nome_arquivo'], dados['analise_profunda'], dados['status_agenda']
         ]
@@ -185,11 +185,10 @@ def main():
         tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True)
         
         col1, col2 = st.columns(2)
-        
-        # 🆕 LÓGICA DE CAMPOS POR PERFIL (SOLICITADO)
         if tipo == "Empresa":
             nome = col1.text_input("Razão Social")
-            cnpj = col2.text_input("CNPJ", key="cnpj_input", on_change=formatar_cnpj_callback)
+            cnpj = col2.text_input("CNPJ", key="cnpj_input", on_change=formatar_cnpj_callback, placeholder="00.000.000/0000-00")
+            resp = st.text_input("Nome do Responsável") # 🆕 Campo adicionado
             email = st.text_input("E-mail para contato")
             tel = st.text_input("WhatsApp (Responsável)", key="tel_input", on_change=formatar_tel_callback)
         else:
@@ -197,6 +196,7 @@ def main():
             email = col2.text_input("E-mail")
             tel = st.text_input("WhatsApp", key="tel_input", on_change=formatar_tel_callback)
             cnpj = ""
+            resp = nome
         
         if tipo == "Advogado":
             opcoes_servico = ["Liquidação", "Iniciais", "Impugnação", "Rescisão", "Horas Extras", "Outros"]
@@ -213,10 +213,14 @@ def main():
         relato = st.text_area("Resumo da Demanda:")
 
         if st.button("💬 Analisar Solicitação"):
-            if not nome or not st.session_state.tel_input: st.warning("Preencha Nome e WhatsApp.")
+            cnpj_limpo = re.sub(r'\D', '', cnpj)
+            if not nome or not st.session_state.tel_input: 
+                st.warning("Preencha o Nome/Razão Social e WhatsApp.")
+            elif tipo == "Empresa" and len(cnpj_limpo) != 14:
+                st.error("Por favor, informe um CNPJ válido com 14 dígitos.") # 🆕 Validação de CNPJ
             else:
                 st.session_state.dados_form.update({
-                    "nome": nome, "tel": st.session_state.tel_input, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico,
+                    "nome": nome, "resp": resp, "tel": st.session_state.tel_input, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico,
                     "adm": st.session_state.adm_input, "sai": st.session_state.sai_input, "salario": st.session_state.sal_input, "relato": relato
                 })
                 with st.spinner("Analisando..."):
@@ -276,7 +280,7 @@ def main():
                 
                 status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                 salvar_na_planilha(client_sheets, {
-                    "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'], "email": d['email'], "cnpj": d.get('cnpj', ''),
+                    "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "resp": d.get('resp', ''), "telefone": d['tel'], "email": d['email'], "cnpj": d.get('cnpj', ''),
                     "melhor_horario": horario, "servico": d['servico'], "ia_inicial": st.session_state.ia_inicial,
                     "complemento_relato": st.session_state.relato_complementar, "nome_arquivo": st.session_state.nome_arquivo,
                     "analise_profunda": analise_profunda, "status_agenda": status
