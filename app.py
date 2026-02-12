@@ -28,6 +28,32 @@ SCOPES = [
 NOME_PLANILHA_GOOGLE = 'Atendimento_Fred' 
 
 # --- CALLBACKS DE FORMATAÇÃO ---
+def formatar_cnpj_callback():
+    val = st.session_state.cnpj_input
+    limpo = re.sub(r'\D', '', str(val))
+    if len(limpo) == 14:
+        st.session_state.cnpj_input = f"{limpo[:2]}.{limpo[2:5]}.{limpo[5:8]}/{limpo[8:12]}-{limpo[12:]}"
+
+def formatar_data_adm_callback():
+    val = st.session_state.adm_input
+    limpo = re.sub(r'\D', '', str(val))
+    if len(limpo) == 8:
+        st.session_state.adm_input = f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
+
+def formatar_data_sai_callback():
+    val = st.session_state.sai_input
+    limpo = re.sub(r'\D', '', str(val))
+    if len(limpo) == 8:
+        st.session_state.sai_input = f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
+
+def formatar_salario_callback():
+    val = st.session_state.sal_input
+    if not val: return
+    temp = val.replace("R$", "").replace(".", "").replace(",", ".").strip()
+    try:
+        valor_float = float(temp)
+        st.session_state.sal_input = f"R$ {valor_float:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except: pass
 
 def formatar_tel_callback():
     val = st.session_state.tel_input
@@ -38,7 +64,6 @@ def formatar_tel_callback():
         st.session_state.tel_input = f"({limpo[:2]}) {limpo[2:6]}-{limpo[6:]}"
 
 # --- FUNÇÕES DE SISTEMA ---
-
 def ler_conteudo_arquivo(uploaded_file):
     if uploaded_file is None: return ""
     try:
@@ -47,7 +72,7 @@ def ler_conteudo_arquivo(uploaded_file):
             texto = "\n".join([p.extract_text() for p in leitor.pages if p.extract_text()])
             return texto
         return str(uploaded_file.read(), "utf-8")
-    except: return "[Erro na leitura do arquivo]"
+    except: return "[Erro na leitura]"
 
 def conectar_google():
     try:
@@ -65,35 +90,11 @@ def consultar_ia(mensagem, sistema, temperatura=0.3):
     try:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {MINHA_CHAVE}", "Content-Type": "application/json"}
-        dados = {
-            "model": "llama-3.1-8b-instant", 
-            "messages": [{"role": "system", "content": sistema}, {"role": "user", "content": mensagem}], 
-            "temperature": temperatura
-        }
+        dados = {"model": "llama-3.1-8b-instant", "messages": [{"role": "system", "content": sistema}, {"role": "user", "content": mensagem}], "temperature": temperatura}
         resp = requests.post(url, headers=headers, json=dados)
         return resp.json()['choices'][0]['message']['content']
     except: return "IA temporariamente indisponível."
 
-def salvar_na_planilha(client_sheets, dados):
-    try:
-        sh = client_sheets.open(NOME_PLANILHA_GOOGLE)
-        sheet = sh.sheet1
-        if not sheet.get_all_values():
-            # 🆕 Cabeçalho com coluna para Nome do Arquivo
-            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Horário", "Serviço", "Resposta Inicial IA", "Complemento Cliente", "Nome do Arquivo", "Análise Total (Relato + Docs)", "Status Agenda"])
-        
-        linha = [
-            dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], 
-            dados['melhor_horario'], dados['servico'], dados['ia_inicial'], dados['complemento_texto'], 
-            dados['nome_arquivo'], dados['analise_pericial'], dados['status_agenda']
-        ]
-        sheet.append_row(linha)
-        return True
-    except Exception as e:
-        st.error(f"❌ Erro Planilha: {e}")
-        return False
-
-# --- FUNÇÕES AGENDA ---
 def buscar_horarios_livres(service_calendar):
     sugestoes = []
     dia_foco = datetime.now() + timedelta(days=1)
@@ -126,105 +127,96 @@ def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
         return "Agendado"
     except: return "Erro Agenda"
 
+def salvar_na_planilha(client_sheets, dados):
+    try:
+        sh = client_sheets.open(NOME_PLANILHA_GOOGLE)
+        sheet = sh.sheet1
+        if not sheet.get_all_values():
+            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Horário", "Serviço", "Resposta Inicial IA", "Complemento Cliente", "Nome do Arquivo", "Análise Total Frederico", "Status Agenda"])
+        linha = [dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], dados['melhor_horario'], dados['servico'], dados['ia_inicial'], dados['complemento_texto'], dados['nome_arquivo'], dados['analise_pericial'], dados['status_agenda']]
+        sheet.append_row(linha)
+        return True
+    except: return False
+
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
     if 'fase' not in st.session_state: st.session_state.fase = 1
     if 'dados_form' not in st.session_state: st.session_state.dados_form = {}
-    if 'ia_inicial' not in st.session_state: st.session_state.ia_inicial = ""
-    if 'complemento_texto' not in st.session_state: st.session_state.complemento_texto = "Não enviado"
-    if 'nome_arquivo' not in st.session_state: st.session_state.nome_arquivo = "Nenhum"
+    if 'ia_resumo_cliente' not in st.session_state: st.session_state.ia_resumo_cliente = ""
     if 'conteudo_arquivo' not in st.session_state: st.session_state.conteudo_arquivo = ""
+    if 'nome_arquivo' not in st.session_state: st.session_state.nome_arquivo = "Nenhum"
 
     client_sheets, service_calendar = conectar_google()
 
-    st.markdown("### Frederico Novotny - Consultor Trabalhista")
+    col_logo, col_text = st.columns([1, 4])
+    with col_logo: st.markdown("<h1 style='text-align: center; margin-top: 5px;'>📟</h1>", unsafe_allow_html=True)
+    with col_text:
+        st.markdown("<h1 style='margin-bottom: -15px; padding-bottom: 0;'>Frederico Novotny</h1>", unsafe_allow_html=True)
+        st.markdown("<h3 style='color: gray; margin-top: 0; padding-top: 0;'>Consultor Trabalhista</h3>", unsafe_allow_html=True)
     st.divider()
 
     if st.session_state.fase == 1:
         st.subheader("1. Identificação")
+        d = st.session_state.dados_form
         tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True)
-        nome = st.text_input("Nome/Razão Social")
-        tel = st.text_input("WhatsApp", key="tel_input", on_change=formatar_tel_callback)
-        servico = st.selectbox("Tipo de Cálculo:", ["Liquidação", "Iniciais", "Rescisão", "Horas Extras", "Outros"])
+        col1, col2 = st.columns(2)
+        nome = col1.text_input("Nome/Razão Social", value=d.get("nome", ""))
+        cnpj = col2.text_input("CNPJ", key="cnpj_input", on_change=formatar_cnpj_callback)
+        tel = st.text_input("WhatsApp", value=d.get("tel", ""), key="tel_input", on_change=formatar_tel_callback)
+        servico = st.selectbox("Serviço:", ["Liquidação", "Iniciais", "Rescisão", "Horas Extras", "Outros"])
         
-        if st.button("💬 Iniciar Análise"):
-            if not nome or not st.session_state.tel_input: st.warning("Preencha os campos.")
-            else:
-                st.session_state.dados_form.update({"nome": nome, "tel": st.session_state.tel_input, "tipo": tipo, "servico": servico})
-                with st.spinner("IA processando..."):
-                    p = f"Saúde cordialmente {nome} ({tipo}) que busca {servico}. Seja breve e profissional."
-                    st.session_state.ia_inicial = consultar_ia(p, "Assistente Jurídico.")
-                    st.session_state.fase = 2; st.rerun()
+        if st.button("💬 Próximo"):
+            st.session_state.dados_form.update({"nome": nome, "tel": st.session_state.tel_input, "tipo": tipo, "servico": servico})
+            with st.spinner("Iniciando..."):
+                p = f"Saúde cordialmente {nome} ({tipo}) que solicita {servico}. Seja direto."
+                st.session_state.ia_resumo_cliente = consultar_ia(p, "Assistente Virtual.")
+                st.session_state.fase = 2; st.rerun()
 
     if st.session_state.fase == 2:
-        st.subheader("2. Complemento de Informações")
-        st.info(st.session_state.ia_inicial)
-        
-        metodo = st.radio("Deseja detalhar seu caso agora?", ["Sim, digitar relato", "Não, vou apenas anexar documentos"], horizontal=True)
-
-        if metodo == "Sim, digitar relato":
-            relato_user = st.text_area("Descreva os detalhes aqui:")
-            if st.button("Salvar Relato"):
-                st.session_state.complemento_texto = relato_user
-                st.success("Relato salvo!")
-        
-        if st.button("✅ Prosseguir para Documentos"):
-            st.session_state.fase = 3; st.rerun()
+        st.subheader("2. Confirmação")
+        st.info(st.session_state.ia_resumo_cliente)
+        col_v, col_r = st.columns(2)
+        if col_v.button("✅ Confirmar"): st.session_state.fase = 3; st.rerun()
+        if col_r.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
 
     if st.session_state.fase == 3:
-        st.subheader("3. Documentos")
+        st.subheader("3. Documentos e Relato")
+        st.warning("🔒 **LGPD:** Documentos são usados apenas para análise inicial e não serão salvos.")
         arquivo = st.file_uploader("Anexar PDF ou TXT", type=["pdf", "txt"])
-        if arquivo: 
-            st.session_state.nome_arquivo = arquivo.name # 🆕 Captura o nome do arquivo
-            st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo)
-            st.success(f"Arquivo '{arquivo.name}' processado.")
         
-        if st.button("🔽 Ir para Agendamento"): st.session_state.fase = 4; st.rerun()
+        if arquivo:
+            st.session_state.nome_arquivo = arquivo.name
+            st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo)
+            with st.spinner("Interpretando documento..."):
+                p_int = f"Interprete brevemente este arquivo: {st.session_state.conteudo_arquivo[:1500]}. Diga o que identificou e peça ao usuário um breve relato complementar."
+                st.chat_message("assistant").write(consultar_ia(p_int, "Perito Assistente."))
+        
+        relato = st.text_area("Breve relato do que você precisa:", placeholder="Ex: Preciso conferir as horas extras do arquivo acima...")
+        
+        if st.button("🗓️ Ir para Agendamento"):
+            st.session_state.dados_form["relato_final"] = relato
+            st.session_state.fase = 4; st.rerun()
 
     if st.session_state.fase == 4:
-        st.subheader("4. Finalizar Agendamento")
+        st.subheader("4. Finalizar")
         horarios = buscar_horarios_livres(service_calendar)
-        horario = st.selectbox("Escolha o Horário:", horarios)
-        
+        horario = st.selectbox("Horário:", horarios)
         if st.button("✅ Confirmar Tudo"):
-            with st.spinner("Realizando Análise Total..."):
+            with st.spinner("Processando análise..."):
                 d = st.session_state.dados_form
-                
-                # 🆕 PROMPT DE ANÁLISE TOTAL (RELATO + DOCUMENTOS)
-                p_analise_total = f"""
-                Você é um Perito Trabalhista Sênior. 
-                Analise de forma INTEGRADA as informações abaixo para o Consultor Frederico:
-                
-                1. RELATO DO CLIENTE: {st.session_state.complemento_texto}
-                2. CONTEÚDO DOS DOCUMENTOS: {st.session_state.conteudo_arquivo if st.session_state.conteudo_arquivo else 'Nenhum arquivo enviado'}
-                
-                TAREFA: 
-                - Identifique se o relato do cliente bate com o que está nos documentos.
-                - Destaque divergências ou pontos de atenção técnica.
-                - Sugira verbas a calcular e complexidade.
-                Seja técnico e direto.
-                """
-                analise_total = consultar_ia(p_analise_total, "Perito Contábil Trabalhista.")
-                
-                status_agenda = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
-                
+                p_t = f"Análise Pericial para Frederico: Relato: {d.get('relato_final', '')} | Doc: {st.session_state.conteudo_arquivo}"
+                analise_total = consultar_ia(p_t, "Perito Trabalhista Sênior.")
+                status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                 salvar_na_planilha(client_sheets, {
-                    "data_hora": datetime.now().strftime("%d/%m %H:%M"), 
-                    "tipo_usuario": d['tipo'], 
-                    "nome": d['nome'], 
-                    "telefone": d['tel'],
-                    "melhor_horario": horario, 
-                    "servico": d['servico'], 
-                    "ia_inicial": st.session_state.ia_inicial,
-                    "complemento_texto": st.session_state.complemento_texto,
-                    "nome_arquivo": st.session_state.nome_arquivo, # 🆕 Nome do arquivo vai para a planilha
-                    "analise_pericial": analise_total, # 🆕 Resultado da análise integrada
-                    "status_agenda": status_agenda
+                    "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'],
+                    "melhor_horario": horario, "servico": d['servico'], "ia_inicial": st.session_state.ia_resumo_cliente,
+                    "complemento_texto": d.get("relato_final", ""), "nome_arquivo": st.session_state.nome_arquivo,
+                    "analise_pericial": analise_total, "status_agenda": status
                 })
                 st.session_state.fase = 5; st.rerun()
 
     if st.session_state.fase == 5:
-        st.balloons(); st.success("✅ Tudo pronto! Frederico entrará em contato."); st.button("🔄 Novo", on_click=lambda: st.session_state.clear())
+        st.balloons(); st.success("✅ Tudo pronto!"); st.button("🔄 Novo", on_click=lambda: st.session_state.clear())
 
 if __name__ == "__main__":
     main()
