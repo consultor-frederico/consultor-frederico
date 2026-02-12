@@ -79,7 +79,8 @@ def salvar_na_planilha(client_sheets, dados):
         sh = client_sheets.open(NOME_PLANILHA_GOOGLE)
         sheet = sh.sheet1
         if not sheet.get_all_values():
-            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Horário", "Serviço", "Resposta Inicial IA", "Complemento Cliente", "Nome do Arquivo", "Análise Total Frederico", "Status Agenda"])
+            # 🆕 Cabeçalho com coluna para Nome do Arquivo
+            sheet.append_row(["Data", "Tipo", "Nome", "Contato", "Horário", "Serviço", "Resposta Inicial IA", "Complemento Cliente", "Nome do Arquivo", "Análise Total (Relato + Docs)", "Status Agenda"])
         
         linha = [
             dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados['telefone'], 
@@ -130,7 +131,6 @@ def main():
     if 'fase' not in st.session_state: st.session_state.fase = 1
     if 'dados_form' not in st.session_state: st.session_state.dados_form = {}
     if 'ia_inicial' not in st.session_state: st.session_state.ia_inicial = ""
-    if 'ia_consolidada' not in st.session_state: st.session_state.ia_consolidada = ""
     if 'complemento_texto' not in st.session_state: st.session_state.complemento_texto = "Não enviado"
     if 'nome_arquivo' not in st.session_state: st.session_state.nome_arquivo = "Nenhum"
     if 'conteudo_arquivo' not in st.session_state: st.session_state.conteudo_arquivo = ""
@@ -152,7 +152,7 @@ def main():
             else:
                 st.session_state.dados_form.update({"nome": nome, "tel": st.session_state.tel_input, "tipo": tipo, "servico": servico})
                 with st.spinner("IA processando..."):
-                    p = f"Saúde cordialmente {nome} ({tipo}) que busca {servico}. Seja breve."
+                    p = f"Saúde cordialmente {nome} ({tipo}) que busca {servico}. Seja breve e profissional."
                     st.session_state.ia_inicial = consultar_ia(p, "Assistente Jurídico.")
                     st.session_state.fase = 2; st.rerun()
 
@@ -160,81 +160,71 @@ def main():
         st.subheader("2. Complemento de Informações")
         st.info(st.session_state.ia_inicial)
         
-        # 🆕 AVISO DE PRIVACIDADE E LGPD
-        st.warning("🔒 **Compromisso com sua Privacidade (LGPD):** Os documentos enviados não serão salvos em nossos bancos de dados. Eles serão utilizados exclusivamente para esta análise inicial e descartados em seguida.")
+        metodo = st.radio("Deseja detalhar seu caso agora?", ["Sim, digitar relato", "Não, vou apenas anexar documentos"], horizontal=True)
 
-        metodo = st.radio("Deseja detalhar seu caso?", ["Sim, digitar relato agora", "Vou anexar documentos para a IA ler"], horizontal=True)
-
-        if metodo == "Sim, digitar relato agora":
+        if metodo == "Sim, digitar relato":
             relato_user = st.text_area("Descreva os detalhes aqui:")
-            if st.button("Salvar Detalhes"):
+            if st.button("Salvar Relato"):
                 st.session_state.complemento_texto = relato_user
-                st.success("Informações recebidas!")
-        else:
-            st.info("ℹ️ Selecione a opção abaixo e anexe os arquivos na próxima tela. A IA fará a interpretação automática para você.")
-
-        if st.button("✅ Prosseguir"):
+                st.success("Relato salvo!")
+        
+        if st.button("✅ Prosseguir para Documentos"):
             st.session_state.fase = 3; st.rerun()
 
     if st.session_state.fase == 3:
-        st.subheader("3. Análise de Documentos")
+        st.subheader("3. Documentos")
         arquivo = st.file_uploader("Anexar PDF ou TXT", type=["pdf", "txt"])
-        
         if arquivo: 
-            st.session_state.nome_arquivo = arquivo.name
+            st.session_state.nome_arquivo = arquivo.name # 🆕 Captura o nome do arquivo
             st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo)
-            
-            # 🆕 IA INTERPRETA O ARQUIVO E PEDE BREVE RELATO
-            with st.spinner("IA interpretando arquivo..."):
-                p_interp = f"Interprete brevemente este documento: {st.session_state.conteudo_arquivo[:2000]}. Diga ao usuário o que você identificou e peça que ele escreva abaixo um breve relato do que ele precisa especificamente sobre este arquivo."
-                interpretacao = consultar_ia(p_interp, "Assistente Jurídico.")
-                st.chat_message("assistant").write(interpretacao)
-                
-                relato_sobre_doc = st.text_area("Seu relato sobre este documento:", key="relato_doc")
-                if st.button("Consolidar Informações"):
-                    st.session_state.complemento_texto = relato_sobre_doc
-                    with st.spinner("Consolidando..."):
-                        p_cons = f"O usuário enviou o arquivo {arquivo.name} e disse: {relato_user if 'relato_user' in locals() else relato_doc}. Traga um entendimento superficial e cordial para o usuário, mostrando que entendeu o pedido."
-                        st.session_state.ia_consolidada = consultar_ia(p_cons, "Assistente Jurídico.")
-                        st.info(st.session_state.ia_consolidada)
+            st.success(f"Arquivo '{arquivo.name}' processado.")
         
-        if st.button("🗓️ Ir para Agendamento"): st.session_state.fase = 4; st.rerun()
+        if st.button("🔽 Ir para Agendamento"): st.session_state.fase = 4; st.rerun()
 
     if st.session_state.fase == 4:
-        st.subheader("4. Agendamento Final")
+        st.subheader("4. Finalizar Agendamento")
         horarios = buscar_horarios_livres(service_calendar)
         horario = st.selectbox("Escolha o Horário:", horarios)
         
-        if st.button("✅ Finalizar"):
-            with st.spinner("Gerando Dossiê Frederico..."):
+        if st.button("✅ Confirmar Tudo"):
+            with st.spinner("Realizando Análise Total..."):
                 d = st.session_state.dados_form
-                # 🆕 ANÁLISE COMPLETA PARA O FREDERICO
-                p_pericial = f"""
-                Você é o Perito do Frederico.
-                DADOS: Cliente {d['nome']}, Serviço {d['servico']}.
-                RELATO: {st.session_state.complemento_texto}
-                DOCUMENTO: {st.session_state.conteudo_arquivo}
                 
-                TAREFA: Gere uma análise profunda e técnica. Identifique verbas, riscos, inconsistências entre relato e doc, e complexidade do cálculo.
+                # 🆕 PROMPT DE ANÁLISE TOTAL (RELATO + DOCUMENTOS)
+                p_analise_total = f"""
+                Você é um Perito Trabalhista Sênior. 
+                Analise de forma INTEGRADA as informações abaixo para o Consultor Frederico:
+                
+                1. RELATO DO CLIENTE: {st.session_state.complemento_texto}
+                2. CONTEÚDO DOS DOCUMENTOS: {st.session_state.conteudo_arquivo if st.session_state.conteudo_arquivo else 'Nenhum arquivo enviado'}
+                
+                TAREFA: 
+                - Identifique se o relato do cliente bate com o que está nos documentos.
+                - Destaque divergências ou pontos de atenção técnica.
+                - Sugira verbas a calcular e complexidade.
+                Seja técnico e direto.
                 """
-                analise_total_fred = consultar_ia(p_pericial, "Perito Trabalhista Sênior.")
+                analise_total = consultar_ia(p_analise_total, "Perito Contábil Trabalhista.")
                 
                 status_agenda = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                 
                 salvar_na_planilha(client_sheets, {
                     "data_hora": datetime.now().strftime("%d/%m %H:%M"), 
-                    "tipo_usuario": d['tipo'], "nome": d['nome'], "telefone": d['tel'],
-                    "melhor_horario": horario, "servico": d['servico'], 
+                    "tipo_usuario": d['tipo'], 
+                    "nome": d['nome'], 
+                    "telefone": d['tel'],
+                    "melhor_horario": horario, 
+                    "servico": d['servico'], 
                     "ia_inicial": st.session_state.ia_inicial,
                     "complemento_texto": st.session_state.complemento_texto,
-                    "nome_arquivo": st.session_state.nome_arquivo, 
-                    "analise_pericial": analise_total_fred, 
+                    "nome_arquivo": st.session_state.nome_arquivo, # 🆕 Nome do arquivo vai para a planilha
+                    "analise_pericial": analise_total, # 🆕 Resultado da análise integrada
                     "status_agenda": status_agenda
                 })
                 st.session_state.fase = 5; st.rerun()
 
     if st.session_state.fase == 5:
-        st.balloons(); st.success("✅ Tudo pronto! Frederico recebeu sua análise e aguarda você no horário marcado."); st.button("🔄 Novo", on_click=lambda: st.session_state.clear())
+        st.balloons(); st.success("✅ Tudo pronto! Frederico entrará em contato."); st.button("🔄 Novo", on_click=lambda: st.session_state.clear())
 
 if __name__ == "__main__":
     main()
