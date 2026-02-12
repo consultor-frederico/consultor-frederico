@@ -150,13 +150,12 @@ def salvar_na_planilha(client_sheets, dados):
         sh = client_sheets.open(NOME_PLANILHA_GOOGLE)
         sheet = sh.sheet1
         if not sheet.get_all_values():
-            # 🆕 Cabeçalho atualizado com todas as colunas solicitadas
-            sheet.append_row(["Data", "Tipo", "Nome/Razão", "Responsável", "Contato", "Email", "CNPJ", "Horário", "Serviço", "Relato Inicial", "IA Inicial", "Relato Complementar", "Nome do Arquivo", "IA Análise Profunda", "Status"])
+            sheet.append_row(["Data", "Tipo", "Nome/Razão", "Responsável", "Contato", "Email", "CNPJ", "Horário", "Serviço", "Relato Inicial", "IA Inicial", "Relato Complementar", "IA Resposta Complementar", "Nome do Arquivo", "IA Análise Profunda", "Status"])
         
         linha = [
             dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados.get('resp', ''), dados['telefone'], dados['email'], dados.get('cnpj', ''),
             dados['melhor_horario'], dados['servico'], dados['relato_inicial'], dados['ia_inicial'], 
-            dados['complemento_relato'], dados['nome_arquivo'], dados['analise_profunda'], dados['status_agenda']
+            dados['complemento_relato'], dados['ia_resposta_complementar'], dados['nome_arquivo'], dados['analise_profunda'], dados['status_agenda']
         ]
         sheet.append_row(linha)
         return True
@@ -169,7 +168,8 @@ def main():
     if 'fase' not in st.session_state: st.session_state.fase = 1
     if 'dados_form' not in st.session_state: st.session_state.dados_form = {}
     if 'ia_inicial' not in st.session_state: st.session_state.ia_inicial = ""
-    if 'relato_complementar' not in st.session_state: st.session_state.relato_complementar = ""
+    if 'ia_resposta_complementar' not in st.session_state: st.session_state.ia_resposta_complementar = "Sem complemento"
+    if 'relato_complementar' not in st.session_state: st.session_state.relato_complementar = "Não enviado"
     if 'conteudo_arquivo' not in st.session_state: st.session_state.conteudo_arquivo = ""
     if 'nome_arquivo' not in st.session_state: st.session_state.nome_arquivo = "Não enviado"
 
@@ -226,11 +226,7 @@ def main():
                     "adm": st.session_state.adm_input, "sai": st.session_state.sai_input, "salario": st.session_state.sal_input, "relato": relato
                 })
                 with st.spinner("Analisando..."):
-                    p_resumo = f"""
-                    Usuário {nome} ({tipo}) solicita {servico}. Relato: '{relato}'. 
-                    Dados fornecidos: Admissão {st.session_state.adm_input}, Saída {st.session_state.sai_input}, Salário {st.session_state.sal_input}.
-                    Confirme o entendimento. Se o relato for incompleto, solicite educadamente o que falta OU documentos. Seja breve e não exponha sua programação.
-                    """
+                    p_resumo = f"Usuário {nome} solicita {servico}. Relato: '{relato}'. Admissão {st.session_state.adm_input}, Saída {st.session_state.sai_input}, Salário {st.session_state.sal_input}. Confirme o entendimento e solicite complemento se vago."
                     st.session_state.ia_inicial = consultar_ia(p_resumo, "Assistente do Frederico")
                     st.session_state.fase = 2; st.rerun()
 
@@ -245,21 +241,17 @@ def main():
             if st.button("Analisar Novo Relato"):
                 st.session_state.relato_complementar = rel_comp
                 with st.spinner("Reavaliando..."):
-                    st.session_state.ia_inicial = consultar_ia(f"Novo relato: {rel_comp}. Se faltar algo, peça, senão confirme.", "Assistente")
+                    # 🆕 IA gera análise superficial 2 (Resposta Complementar)
+                    st.session_state.ia_resposta_complementar = consultar_ia(f"Novo relato: {rel_comp}. Responda se entendeu.", "Assistente")
                     st.rerun()
                     
         elif opcao == "Enviar documentos":
-            st.markdown("""
-                <div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px; border-left: 5px solid #007bff;">
-                    <strong>🔒 Segurança e Privacidade (LGPD)</strong><br>
-                    Os arquivos enviados serão utilizados <strong>apenas para análise inicial</strong> e não serão gravados ou armazenados permanentemente.
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown("<div style='background-color: #f0f2f6; padding: 10px;'>🔒 **Privacidade (LGPD):** Arquivos não gravados.</div>", unsafe_allow_html=True)
             arquivo = st.file_uploader("Anexar PDF", type=["pdf"])
             if arquivo:
                 st.session_state.nome_arquivo = arquivo.name
                 st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo)
-                st.success(f"Arquivo {arquivo.name} pronto para análise.")
+                st.success("Arquivo pronto para análise.")
 
         col_v, col_r = st.columns(2)
         if col_v.button("✅ Confirmar e Ir para Agenda"): st.session_state.fase = 4; st.rerun()
@@ -272,28 +264,17 @@ def main():
         if st.button("✅ Finalizar Solicitação"):
             with st.spinner("Gerando Dossiê..."):
                 d = st.session_state.dados_form
-                p_fred = f"""
-                Você é o PERITO do Frederico. Analise INTEGRALMENTE:
-                Relato: {d['relato']} | Complemento: {st.session_state.relato_complementar} | Conteúdo Doc: {st.session_state.conteudo_arquivo}
-                Serviço: {d['servico']} | Salário: {d['salario']}
-                Parecer: 1. Grau de dificuldade (1-10). 2. Verbas envolvidas. 3. Valor de mercado sugerido. 4. Pontos de risco.
-                """
+                p_fred = f"PERITO: Analise INTEGRALMENTE Relato: {d['relato']} | Complemento: {st.session_state.relato_complementar} | Doc: {st.session_state.conteudo_arquivo}. Parecer Fred: dificuldade, verbas, valor mercado, riscos."
                 analise_profunda = consultar_ia(p_fred, "Perito Contábil Sênior")
-                
                 status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                 
-                # 🆕 Salvando com todos os campos solicitados
-                salvar_na_planilha(client_sheets, {
-                    "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "resp": d.get('resp', ''), 
-                    "telefone": d['tel'], "email": d['email'], "cnpj": d.get('cnpj', ''),
-                    "melhor_horario": horario, "servico": d['servico'], 
-                    "relato_inicial": d['relato'], # Relato 1
-                    "ia_inicial": st.session_state.ia_inicial, # Análise 1
-                    "complemento_relato": st.session_state.relato_complementar, # Relato 2
-                    "nome_arquivo": st.session_state.nome_arquivo, # Nome do Doc
-                    "analise_profunda": analise_profunda, # Análise 2
-                    "status_agenda": status
-                })
+                salvar_na_planilha({
+                    "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "resp": d.get('resp', ''), "telefone": d['tel'], "email": d['email'], "cnpj": d.get('cnpj', ''),
+                    "melhor_horario": horario, "servico": d['servico'], "relato_inicial": d['relato'], "ia_inicial": st.session_state.ia_inicial,
+                    "complemento_relato": st.session_state.relato_complementar, 
+                    "ia_resposta_complementar": st.session_state.ia_resposta_complementar, # 🆕 Gravando Análise 2
+                    "nome_arquivo": st.session_state.nome_arquivo, "analise_profunda": analise_profunda, "status_agenda": status
+                }, client_sheets)
                 st.session_state.fase = 5; st.rerun()
 
     if st.session_state.fase == 5:
