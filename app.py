@@ -47,6 +47,12 @@ def formatar_data_sai_callback():
     if len(limpo) == 8:
         st.session_state.sai_input = f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
 
+def formatar_data_prazo_callback():
+    val = st.session_state.prazo_input
+    limpo = re.sub(r'\D', '', str(val))
+    if len(limpo) == 8:
+        st.session_state.prazo_input = f"{limpo[:2]}/{limpo[2:4]}/{limpo[4:]}"
+
 def formatar_salario_callback():
     val = st.session_state.sal_input
     if not val: return
@@ -142,10 +148,10 @@ def salvar_na_planilha(client_sheets, dados):
         sh = client_sheets.open(NOME_PLANILHA_GOOGLE)
         sheet = sh.sheet1
         if not sheet.get_all_values():
-            sheet.append_row(["Data", "Tipo", "Nome/Razão", "Responsável", "Contato", "Email", "CNPJ", "Horário", "Serviço", "Relato Inicial", "IA Inicial", "Relato Complementar", "IA Resposta Complementar", "Nome do Arquivo", "IA Análise Profunda", "Status"])
+            sheet.append_row(["Data", "Tipo", "Nome/Razão", "Responsável", "Contato", "Email", "CNPJ", "Horário", "Serviço", "Data Prazo", "Relato Inicial", "IA Inicial", "Relato Complementar", "IA Resposta Complementar", "Nome do Arquivo", "IA Análise Profunda", "Status"])
         linha = [
             dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados.get('resp', ''), dados['telefone'], dados['email'], dados.get('cnpj', ''),
-            dados['melhor_horario'], dados['servico'], dados['relato_inicial'], dados['ia_inicial'], 
+            dados['melhor_horario'], dados['servico'], dados.get('prazo', ''), dados['relato_inicial'], dados['ia_inicial'], 
             dados['complemento_relato'], dados['ia_resposta_complementar'], dados['nome_arquivo'], dados['analise_profunda'], dados['status_agenda']
         ]
         sheet.append_row(linha)
@@ -202,7 +208,16 @@ def main():
         c_adm, c_sai = st.columns(2)
         adm = c_adm.text_input("Admissão (DDMMAAAA)", key="adm_input", on_change=formatar_data_adm_callback, value=d.get("adm", ""))
         sai = c_sai.text_input("Saída (DDMMAAAA)", key="sai_input", on_change=formatar_data_sai_callback, value=d.get("sai", ""))
-        salario = st.text_input("Salário Base", key="sal_input", on_change=formatar_salario_callback, value=d.get("salario", ""))
+        
+        col_sal, col_prazo = st.columns(2)
+        salario = col_sal.text_input("Salário Base", key="sal_input", on_change=formatar_salario_callback, value=d.get("salario", ""))
+        
+        # 🆕 Sugestão 1: Verificação de Prazos (Apenas para Advogado)
+        if tipo == "Advogado":
+            prazo = col_prazo.text_input("Data Prazo/Citação (DDMMAAAA)", key="prazo_input", on_change=formatar_data_prazo_callback, value=d.get("prazo", ""))
+        else:
+            prazo = ""
+        
         relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""))
 
         if st.button("💬 Analisar Solicitação"):
@@ -212,13 +227,12 @@ def main():
             elif tipo == "Empresa" and len(cnpj_limpo) != 14:
                 st.error("Por favor, informe um CNPJ válido com 14 dígitos.")
             else:
-                st.session_state.dados_form.update({"nome": nome, "resp": resp, "tel": tel, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico, "adm": adm, "sai": sai, "salario": salario, "relato": relato})
+                st.session_state.dados_form.update({"nome": nome, "resp": resp, "tel": tel, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico, "adm": adm, "sai": sai, "salario": salario, "relato": relato, "prazo": prazo})
                 with st.spinner("Analisando..."):
-                    # Prompt atualizado para cumprimentar conforme o perfil
                     p_resumo = f"""
                     Você é o assistente direto do Consultor Frederico. 
                     Usuário: {nome} | Perfil: {tipo} | Serviço: {servico}
-                    Dados preenchidos: Admissão {adm}, Saída {sai}, Salário {salario}.
+                    Dados preenchidos: Admissão {adm}, Saída {sai}, Salário {salario}, Prazo {prazo}.
                     Relato: '{relato}'
 
                     REGRAS DE RESPOSTA:
@@ -240,7 +254,6 @@ def main():
             if st.button("Analisar Novo Relato"):
                 st.session_state.relato_complementar = rel_comp
                 with st.spinner("Reavaliando..."):
-                    # IA mantém o tratamento no complemento
                     p_comp = f"O usuário {st.session_state.dados_form['nome']} ({st.session_state.dados_form['tipo']}) complementou: {rel_comp}. Responda se entendeu usando o tratamento Dr/Dra ou Sr/Sra."
                     st.session_state.ia_resposta_complementar = consultar_ia(p_comp, "Assistente Jurídico.")
                     st.rerun()
@@ -263,7 +276,18 @@ def main():
         if st.button("✅ Finalizar Solicitação"):
             with st.spinner("Gerando Dossiê..."):
                 d = st.session_state.dados_form
-                p_fred = f"PERITO: Analise INTEGRALMENTE: Relato 1: {d['relato']} | Relato 2: {st.session_state.relato_complementar} | Conteúdo Doc: {st.session_state.conteudo_arquivo}. Forneça ao Fred: grau de dificuldade, verbas envolvidas, valor sugerido e riscos."
+                # 🆕 Sugestão 2: Honorários integrados no prompt técnico
+                p_fred = f"""
+                Você é o PERITO do Frederico. Analise INTEGRALMENTE: 
+                Relato 1: {d['relato']} | Relato 2: {st.session_state.relato_complementar} | Conteúdo Doc: {st.session_state.conteudo_arquivo}.
+                Serviço: {d['servico']} | Salário: {d['salario']} | Prazo: {d['prazo']}.
+                
+                Forneça ao Fred um parecer técnico contendo: 
+                1. Grau de dificuldade (1-10). 
+                2. Verbas envolvidas. 
+                3. Estimativa de honorários profissionais sugeridos para este serviço (valor de mercado).
+                4. Pontos de risco e urgência (baseado no prazo fornecido).
+                """
                 analise_profunda = consultar_ia(p_fred, "Perito Contábil Sênior")
                 status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                 salvar_na_planilha(client_sheets, {**d, "data_hora": datetime.now().strftime("%d/%m %H:%M"), "melhor_horario": horario, "relato_inicial": d['relato'], "ia_inicial": st.session_state.ia_inicial, "complemento_relato": st.session_state.relato_complementar, "ia_resposta_complementar": st.session_state.ia_resposta_complementar, "nome_arquivo": st.session_state.nome_arquivo, "analise_profunda": analise_profunda, "status_agenda": status, "tipo_usuario": d['tipo'], "telefone": d['tel']})
