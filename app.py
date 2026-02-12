@@ -150,10 +150,12 @@ def salvar_na_planilha(client_sheets, dados):
         sh = client_sheets.open(NOME_PLANILHA_GOOGLE)
         sheet = sh.sheet1
         if not sheet.get_all_values():
-            sheet.append_row(["Data", "Tipo", "Nome/Razão", "Responsável", "Contato", "Email", "CNPJ", "Horário", "Serviço", "Resposta Inicial IA", "Complemento Relato", "Nome do Arquivo", "Análise Profunda IA", "Status"])
+            # 🆕 Cabeçalho atualizado com todas as colunas solicitadas
+            sheet.append_row(["Data", "Tipo", "Nome/Razão", "Responsável", "Contato", "Email", "CNPJ", "Horário", "Serviço", "Relato Inicial", "IA Inicial", "Relato Complementar", "Nome do Arquivo", "IA Análise Profunda", "Status"])
+        
         linha = [
             dados['data_hora'], dados['tipo_usuario'], dados['nome'], dados.get('resp', ''), dados['telefone'], dados['email'], dados.get('cnpj', ''),
-            dados['melhor_horario'], dados['servico'], dados['ia_inicial'], 
+            dados['melhor_horario'], dados['servico'], dados['relato_inicial'], dados['ia_inicial'], 
             dados['complemento_relato'], dados['nome_arquivo'], dados['analise_profunda'], dados['status_agenda']
         ]
         sheet.append_row(linha)
@@ -188,7 +190,7 @@ def main():
         if tipo == "Empresa":
             nome = col1.text_input("Razão Social")
             cnpj = col2.text_input("CNPJ", key="cnpj_input", on_change=formatar_cnpj_callback, placeholder="00.000.000/0000-00")
-            resp = st.text_input("Nome do Responsável") # 🆕 Campo adicionado
+            resp = st.text_input("Nome do Responsável")
             email = st.text_input("E-mail para contato")
             tel = st.text_input("WhatsApp (Responsável)", key="tel_input", on_change=formatar_tel_callback)
         else:
@@ -217,7 +219,7 @@ def main():
             if not nome or not st.session_state.tel_input: 
                 st.warning("Preencha o Nome/Razão Social e WhatsApp.")
             elif tipo == "Empresa" and len(cnpj_limpo) != 14:
-                st.error("Por favor, informe um CNPJ válido com 14 dígitos.") # 🆕 Validação de CNPJ
+                st.error("Por favor, informe um CNPJ válido com 14 dígitos.")
             else:
                 st.session_state.dados_form.update({
                     "nome": nome, "resp": resp, "tel": st.session_state.tel_input, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico,
@@ -257,7 +259,7 @@ def main():
             if arquivo:
                 st.session_state.nome_arquivo = arquivo.name
                 st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo)
-                st.success("Documento pronto para análise.")
+                st.success(f"Arquivo {arquivo.name} pronto para análise.")
 
         col_v, col_r = st.columns(2)
         if col_v.button("✅ Confirmar e Ir para Agenda"): st.session_state.fase = 4; st.rerun()
@@ -279,11 +281,18 @@ def main():
                 analise_profunda = consultar_ia(p_fred, "Perito Contábil Sênior")
                 
                 status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
+                
+                # 🆕 Salvando com todos os campos solicitados
                 salvar_na_planilha(client_sheets, {
-                    "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "resp": d.get('resp', ''), "telefone": d['tel'], "email": d['email'], "cnpj": d.get('cnpj', ''),
-                    "melhor_horario": horario, "servico": d['servico'], "ia_inicial": st.session_state.ia_inicial,
-                    "complemento_relato": st.session_state.relato_complementar, "nome_arquivo": st.session_state.nome_arquivo,
-                    "analise_profunda": analise_profunda, "status_agenda": status
+                    "data_hora": datetime.now().strftime("%d/%m %H:%M"), "tipo_usuario": d['tipo'], "nome": d['nome'], "resp": d.get('resp', ''), 
+                    "telefone": d['tel'], "email": d['email'], "cnpj": d.get('cnpj', ''),
+                    "melhor_horario": horario, "servico": d['servico'], 
+                    "relato_inicial": d['relato'], # Relato 1
+                    "ia_inicial": st.session_state.ia_inicial, # Análise 1
+                    "complemento_relato": st.session_state.relato_complementar, # Relato 2
+                    "nome_arquivo": st.session_state.nome_arquivo, # Nome do Doc
+                    "analise_profunda": analise_profunda, # Análise 2
+                    "status_agenda": status
                 })
                 st.session_state.fase = 5; st.rerun()
 
