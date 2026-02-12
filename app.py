@@ -218,7 +218,20 @@ def main():
         sai = c_sai.text_input("Saída (DDMMAAAA)", value=d.get("sai", ""), key="sai_input", on_change=formatar_data_sai_callback)
         salario = st.text_input("Salário Base", value=d.get("salario", ""), key="sal_input", on_change=formatar_salario_callback)
         
-        relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""))
+        # 🆕 INCLUSÃO DA BIFURCAÇÃO DE ESCOLHA
+        st.divider()
+        st.subheader("Como deseja fornecer os detalhes do caso?")
+        metodo_detalhe = st.radio(
+            "Escolha uma opção:",
+            ["Digitar relato detalhado", "Enviar apenas documentos (Próxima tela)"],
+            horizontal=True
+        )
+
+        if metodo_detalhe == "Digitar relato detalhado":
+            relato = st.text_area("Resumo da Demanda:", value=d.get("relato", ""), help="Explique o que aconteceu.")
+        else:
+            st.info("ℹ️ Entendido. Você poderá anexar os documentos (PDF/TXT) na Fase 3 para nossa análise.")
+            relato = "[O usuário optou por enviar documentos na Fase 3]"
 
         if st.button("💬 Analisar Solicitação"):
             if not nome or not st.session_state.tel_input: st.warning("Preencha Nome e WhatsApp.")
@@ -226,42 +239,32 @@ def main():
                 st.session_state.dados_form.update({
                     "nome": nome, "nome_resp": n_resp, "tel": st.session_state.tel_input, "email": mail, 
                     "cnpj": st.session_state.get("cnpj_input", ""), "tipo": tipo, "servico": servico, 
-                    "relato": relato, "salario": st.session_state.sal_input, "adm": st.session_state.adm_input, "sai": st.session_state.sai_input
+                    "relato": relato, "salario": st.session_state.sal_input, "adm": st.session_state.adm_input, "sai": st.session_state.sai_input,
+                    "metodo": metodo_detalhe
                 })
                 with st.spinner("IA processando..."):
                     p_resumo = f"""
-                    Aja como o assistente do Consultor Frederico. 
-                    Usuário: {nome} | Perfil: {tipo} | Relato: '{relato}'
+                    Aja como o assistente do Consultor Frederico. Usuário: {nome} | Perfil: {tipo} | Relato: '{relato}'
                     
-                    REGRAS DE FILTRO:
-                    1. Analise se o assunto é trabalhista ou de cálculo.
-                    2. Se NÃO for, responda de forma cordial e variada dizendo que o sistema atende apenas demandas trabalhistas. 
-                       OBRIGATORIAMENTE inclua a tag [BLOQUEADO] em sua resposta.
-                    3. Se FOR, confirme o entendimento em máx 2 frases.
+                    REGRAS:
+                    1. Se o relato for de documentos, apenas saúde cordialmente (Dr. ou Sr.) e diga que aguarda os arquivos.
+                    2. Se houver relato, analise se é trabalhista. Se não for, use a tag [BLOQUEADO] e responda cordialmente que só atende trabalhista.
+                    3. Se for vago, solicite mais detalhes educadamente.
                     """
-                    st.session_state.ia_resumo_cliente = consultar_ia(p_resumo, "Assistente Jurídico Direto.")
+                    st.session_state.ia_resumo_cliente = consultar_ia(p_resumo, "Assistente Jurídico.")
                     st.session_state.fase = 2; st.rerun()
 
     if st.session_state.fase == 2:
         st.subheader("2. Confirmação")
-        # Mostra a mensagem limpando a tag de controle
         exibir_msg = st.session_state.ia_resumo_cliente.replace("[BLOQUEADO]", "").strip()
         st.info(exibir_msg)
-        
-        # 🆕 Lógica de visibilidade dos botões
         bloqueado = "[BLOQUEADO]" in st.session_state.ia_resumo_cliente
-        
         if bloqueado:
-            # Se estiver bloqueado, mostra apenas o botão de refazer em destaque
-            if st.button("❌ Refazer"): 
-                st.session_state.fase = 1; st.rerun()
+            if st.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
         else:
-            # Se estiver liberado, mostra os dois botões lado a lado
             col_v, col_r = st.columns(2)
-            if col_v.button("✅ Confirmar e Prosseguir"): 
-                st.session_state.fase = 3; st.rerun()
-            if col_r.button("❌ Refazer"): 
-                st.session_state.fase = 1; st.rerun()
+            if col_v.button("✅ Confirmar e Prosseguir"): st.session_state.fase = 3; st.rerun()
+            if col_r.button("❌ Refazer"): st.session_state.fase = 1; st.rerun()
 
     if st.session_state.fase == 3:
         st.subheader("3. Documentos")
@@ -270,21 +273,20 @@ def main():
         if arquivo: 
             conteudo = ler_conteudo_arquivo(arquivo)
             st.session_state.conteudo_arquivo = conteudo
-            if not "[AVISO" in conteudo: st.success("Documento processado.")
+            if not "[AVISO" in conteudo: st.success("Documento processado com sucesso.")
         if st.button("🔽 Ir para Agendamento"): st.session_state.fase = 4; st.rerun()
 
     if st.session_state.fase == 4:
         st.subheader("🗓️ Finalizar")
         with st.spinner("Verificando agenda..."):
             horarios = buscar_horarios_livres(service_calendar)
-        if not horarios:
-            st.error("Sem horários.")
+        if not horarios: st.error("Sem horários.")
         else:
             horario = st.selectbox("Escolha o Horário:", horarios)
             if st.button("✅ Confirmar Tudo"):
                 with st.spinner("Gravando..."):
                     d = st.session_state.dados_form
-                    p_t = f"Gere análise técnica pericial para o Frederico sobre: {d['relato']} e arquivo {st.session_state.get('conteudo_arquivo', '')}"
+                    p_t = f"Gere análise técnica para Frederico: Relato: {d['relato']} | Doc: {st.session_state.get('conteudo_arquivo', '')}"
                     analise_tecnica = consultar_ia(p_t, "Perito Trabalhista.")
                     status_agenda = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
                     salvar_na_planilha(client_sheets, {
