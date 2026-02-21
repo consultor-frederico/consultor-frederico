@@ -11,9 +11,10 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 
-# --- 🚨 CONFIGURAÇÕES 🚨 ---
-MINHA_CHAVE = "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"
-ID_AGENDA = "a497481e5251098078e6c68882a849680f499f6cef836ab976ffccdaad87689a@group.calendar.google.com"
+# --- 🔐 CONFIGURAÇÕES VIA SECRETS 🔐 ---
+# As chaves agora são puxadas com segurança do ambiente
+MINHA_CHAVE = st.secrets["MINHA_CHAVE"]
+ID_AGENDA = st.secrets["ID_AGENDA"]
 
 st.set_page_config(page_title="Consultor Frederico - Cálculos", page_icon="🧮")
 
@@ -78,7 +79,7 @@ def ler_conteudo_arquivo(uploaded_file):
             texto = "\n".join([p.extract_text() for p in leitor.pages if p.extract_text()])
             return texto
         return str(uploaded_file.read(), "utf-8")
-    except: return "[Erro na leitura técnica do arquivo]"
+    except: return "[Erro na leitura]"
 
 def conectar_google():
     try:
@@ -99,7 +100,7 @@ def consultar_ia(mensagem, sistema, temperatura=0.3):
         dados = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "system", "content": sistema}, {"role": "user", "content": mensagem}], "temperature": temperatura}
         resp = requests.post(url, headers=headers, json=dados).json()
         return resp['choices'][0]['message']['content']
-    except: return "IA temporariamente indisponível."
+    except: return "Assistente temporariamente indisponível."
 
 def buscar_horarios_livres(service_calendar):
     sugestoes = []
@@ -114,8 +115,7 @@ def buscar_horarios_livres(service_calendar):
         horas_ocupadas = [datetime.fromisoformat(e['start'].get('dateTime').replace('Z', '')).hour for e in events if 'dateTime' in e['start']]
         dia_txt = f"{dia_foco.strftime('%d/%m')} ({['Seg','Ter','Qua','Qui','Sex'][dia_foco.weekday()]})"
         for h in range(9, 18):
-            if h != 12 and h not in horas_ocupadas:
-                sugestoes.append(f"{dia_txt} às {h}:00")
+            if h != 12 and h not in horas_ocupadas: sugestoes.append(f"{dia_txt} às {h}:00")
         dia_foco += timedelta(days=1)
     return sugestoes[:15]
 
@@ -152,9 +152,6 @@ def main():
         footer {visibility: hidden;}
         header {visibility: hidden;}
         .stAppDeployButton {display:none;}
-        [data-testid="stStatusWidget"] {visibility: hidden;}
-        div.stDeployButton {display:none;}
-        button[title="View source on GitHub"] {display:none;}
         </style>
         """, unsafe_allow_html=True)
 
@@ -203,17 +200,14 @@ def main():
         
         col_sal, col_prazo = st.columns(2)
         salario = col_sal.text_input("Salário Base", key="sal_input", on_change=formatar_salario_callback, value=d.get("salario", ""))
-        
-        # Sugestão 1: Verificação de Prazos (Exclusivo para Advogados)
         if tipo == "Advogado":
-            prazo = col_prazo.text_input("Data Prazo/Citação (DDMMAAAA)", key="prazo_input", on_change=formatar_data_prazo_callback, value=d.get("prazo", ""))
-        else:
-            prazo = ""
+            prazo = col_prazo.text_input("Data Prazo/Citação", key="prazo_input", on_change=formatar_data_prazo_callback, value=d.get("prazo", ""))
+        else: prazo = ""
         
         relato = st.text_area("Explique sua demanda:", value=d.get("relato", ""))
 
         if st.button("💬 Analisar Solicitação"):
-            if not nome or not tel: st.warning("Por favor, preencha Nome e WhatsApp.")
+            if not nome or not tel: st.warning("Preencha Nome e WhatsApp.")
             else:
                 st.session_state.dados_form.update({"nome": nome, "resp": resp, "tel": tel, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico, "adm": adm, "sai": sai, "salario": salario, "relato": relato, "prazo": prazo})
                 with st.spinner("Analisando..."):
@@ -241,7 +235,6 @@ def main():
                 st.session_state.ia_resposta_complementar = consultar_ia(p_comp, "Assistente Jurídico.")
                 st.rerun()
         elif opcao == "Enviar documentos":
-            st.markdown("<div style='background-color: #f0f2f6; padding: 10px;'>🔒 **Privacidade (LGPD):** Arquivos usados apenas para análise técnica e não gravados permanentemente.</div>", unsafe_allow_html=True)
             arquivo = st.file_uploader("Anexar PDF", type=["pdf"])
             if arquivo:
                 st.session_state.nome_arquivo = arquivo.name
@@ -259,11 +252,10 @@ def main():
         if st.button("✅ Finalizar Agendamento"):
             with st.spinner("Concluindo..."):
                 d = st.session_state.dados_form
-                # Sugestão 2: Honorários sugeridos incluídos na análise pericial interna
                 p_fred = f"""
                 PERITO: Analise INTEGRALMENTE: Relato 1: {d['relato']} | Relato 2: {st.session_state.relato_complementar} | Doc: {st.session_state.conteudo_arquivo}. 
                 Serviço: {d['servico']} | Salário: {d['salario']} | Prazo: {d['prazo']}.
-                Forneça ao Fred: 1. Dificuldade (1-10), 2. Verbas, 3. Honorários sugeridos (valor mercado), 4. Riscos técnicos.
+                Dê ao Fred: 1. Dificuldade (1-10), 2. Verbas, 3. Honorários sugeridos (valor mercado), 4. Riscos técnicos.
                 """
                 analise = consultar_ia(p_fred, "Perito Sênior")
                 status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
