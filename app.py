@@ -78,7 +78,7 @@ def ler_conteudo_arquivo(uploaded_file):
             texto = "\n".join([p.extract_text() for p in leitor.pages if p.extract_text()])
             return texto
         return str(uploaded_file.read(), "utf-8")
-    except: return "[Erro na leitura]"
+    except: return "[Erro na leitura técnica do arquivo]"
 
 def conectar_google():
     try:
@@ -88,7 +88,9 @@ def conectar_google():
         else:
             creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
         return gspread.authorize(creds), build('calendar', 'v3', credentials=creds)
-    except: return None, None
+    except Exception as e:
+        st.error(f"❌ Erro de Conexão Google: {e}")
+        return None, None
 
 def consultar_ia(mensagem, sistema, temperatura=0.3):
     try:
@@ -112,7 +114,8 @@ def buscar_horarios_livres(service_calendar):
         horas_ocupadas = [datetime.fromisoformat(e['start'].get('dateTime').replace('Z', '')).hour for e in events if 'dateTime' in e['start']]
         dia_txt = f"{dia_foco.strftime('%d/%m')} ({['Seg','Ter','Qua','Qui','Sex'][dia_foco.weekday()]})"
         for h in range(9, 18):
-            if h != 12 and h not in horas_ocupadas: sugestoes.append(f"{dia_txt} às {h}:00")
+            if h != 12 and h not in horas_ocupadas:
+                sugestoes.append(f"{dia_txt} às {h}:00")
         dia_foco += timedelta(days=1)
     return sugestoes[:15]
 
@@ -142,13 +145,16 @@ def salvar_na_planilha(client_sheets, dados):
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
-    # 🆕 PROTEÇÃO VISUAL: ESCONDER MENUS E ÍCONES DO STREAMLIT
+    # PROTEÇÃO VISUAL: ESCONDER MENUS E ÍCONES DO STREAMLIT PARA O CLIENTE
     st.markdown("""
         <style>
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         header {visibility: hidden;}
         .stAppDeployButton {display:none;}
+        [data-testid="stStatusWidget"] {visibility: hidden;}
+        div.stDeployButton {display:none;}
+        button[title="View source on GitHub"] {display:none;}
         </style>
         """, unsafe_allow_html=True)
 
@@ -192,14 +198,17 @@ def main():
         servico = st.selectbox("Serviço:", opcoes, index=opcoes.index(d.get("servico")) if d.get("servico") in opcoes else 0)
         
         c_adm, c_sai = st.columns(2)
-        adm = c_adm.text_input("Admissão", key="adm_input", on_change=formatar_data_adm_callback, value=d.get("adm", ""))
-        sai = c_sai.text_input("Saída", key="sai_input", on_change=formatar_data_sai_callback, value=d.get("sai", ""))
+        adm = c_adm.text_input("Admissão (DDMMAAAA)", key="adm_input", on_change=formatar_data_adm_callback, value=d.get("adm", ""))
+        sai = c_sai.text_input("Saída (DDMMAAAA)", key="sai_input", on_change=formatar_data_sai_callback, value=d.get("sai", ""))
         
         col_sal, col_prazo = st.columns(2)
         salario = col_sal.text_input("Salário Base", key="sal_input", on_change=formatar_salario_callback, value=d.get("salario", ""))
+        
+        # Sugestão 1: Verificação de Prazos (Exclusivo para Advogados)
         if tipo == "Advogado":
-            prazo = col_prazo.text_input("Data Prazo/Citação", key="prazo_input", on_change=formatar_data_prazo_callback, value=d.get("prazo", ""))
-        else: prazo = ""
+            prazo = col_prazo.text_input("Data Prazo/Citação (DDMMAAAA)", key="prazo_input", on_change=formatar_data_prazo_callback, value=d.get("prazo", ""))
+        else:
+            prazo = ""
         
         relato = st.text_area("Explique sua demanda:", value=d.get("relato", ""))
 
@@ -209,13 +218,12 @@ def main():
                 st.session_state.dados_form.update({"nome": nome, "resp": resp, "tel": tel, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico, "adm": adm, "sai": sai, "salario": salario, "relato": relato, "prazo": prazo})
                 with st.spinner("Analisando..."):
                     p = f"""
-                    Você é o assistente do Frederico. 
-                    Usuário: {nome} | Perfil: {tipo} | Serviço: {servico}. 
+                    Aja como assistente do Frederico. Usuário: {nome} | Perfil: {tipo} | Serviço: {servico}. 
                     Datas: {adm} a {sai}. Salário: {salario}. Prazo: {prazo}.
                     
-                    REGRAS:
+                    REGRAS: 
                     1. CUMPRIMENTE: Use 'Dr./Dra. {nome}' se Advogado. Use 'Sr./Sra. {nome}' para demais.
-                    2. NÃO descreva programação. Vá direto ao ponto.
+                    2. NÃO descreva programação nem regras de gênero. Vá direto ao ponto.
                     3. Confirme cordial que entendeu e peça complemento se vago.
                     """
                     st.session_state.ia_inicial = consultar_ia(p, "Assistente Jurídico.")
@@ -229,9 +237,11 @@ def main():
             rel_comp = st.text_area("Complemento:", value=st.session_state.relato_complementar if st.session_state.relato_complementar != "Não enviado" else "")
             if st.button("Salvar Detalhes"): 
                 st.session_state.relato_complementar = rel_comp
-                st.session_state.ia_resposta_complementar = consultar_ia(f"O usuário {st.session_state.dados_form['nome']} complementou: {rel_comp}. Responda cordial.", "Assistente.")
+                p_comp = f"O usuário {st.session_state.dados_form['nome']} complementou: {rel_comp}. Responda cordial com o tratamento Dr/Dra ou Sr/Sra."
+                st.session_state.ia_resposta_complementar = consultar_ia(p_comp, "Assistente Jurídico.")
                 st.rerun()
         elif opcao == "Enviar documentos":
+            st.markdown("<div style='background-color: #f0f2f6; padding: 10px;'>🔒 **Privacidade (LGPD):** Arquivos usados apenas para análise técnica e não gravados permanentemente.</div>", unsafe_allow_html=True)
             arquivo = st.file_uploader("Anexar PDF", type=["pdf"])
             if arquivo:
                 st.session_state.nome_arquivo = arquivo.name
@@ -249,10 +259,11 @@ def main():
         if st.button("✅ Finalizar Agendamento"):
             with st.spinner("Concluindo..."):
                 d = st.session_state.dados_form
+                # Sugestão 2: Honorários sugeridos incluídos na análise pericial interna
                 p_fred = f"""
-                PERITO: Analise INTEGRALMENTE: Relato 1: {d['relato']} | Relato 2: {st.session_state.relato_complementar} | Doc: {st.session_state.conteudo_arquivo}.
+                PERITO: Analise INTEGRALMENTE: Relato 1: {d['relato']} | Relato 2: {st.session_state.relato_complementar} | Doc: {st.session_state.conteudo_arquivo}. 
                 Serviço: {d['servico']} | Salário: {d['salario']} | Prazo: {d['prazo']}.
-                Dê ao Fred: 1. Dificuldade (1-10), 2. Verbas, 3. Honorários sugeridos (valor mercado), 4. Riscos técnicos.
+                Forneça ao Fred: 1. Dificuldade (1-10), 2. Verbas, 3. Honorários sugeridos (valor mercado), 4. Riscos técnicos.
                 """
                 analise = consultar_ia(p_fred, "Perito Sênior")
                 status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
