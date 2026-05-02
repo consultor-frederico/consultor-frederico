@@ -5,12 +5,14 @@ import requests
 import gspread
 import re
 import PyPDF2
+import time
 from io import BytesIO
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 
-# --- 🔐 CONFIGURAÇÕES VIA SECRETS (Única mudança real) ---
+# --- 🔐 CONFIGURAÇÕES VIA SECRETS ---
+# Certifique-se de que no Streamlit Cloud a "MINHA_CHAVE" seja a sua API KEY do Google Gemini
 MINHA_CHAVE = st.secrets["MINHA_CHAVE"]
 ID_AGENDA = st.secrets["ID_AGENDA"]
 
@@ -26,7 +28,7 @@ SCOPES = [
 
 NOME_PLANILHA_GOOGLE = 'Atendimento_Fred' 
 
-# --- CALLBACKS DE FORMATAÇÃO (Restaurados) ---
+# --- CALLBACKS DE FORMATAÇÃO ---
 
 def formatar_cnpj_callback():
     val = st.session_state.cnpj_input
@@ -91,14 +93,34 @@ def conectar_google():
         return None, None
 
 def consultar_ia(mensagem, sistema):
-    try:
-        url = "https://api.groq.com/openai/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {MINHA_CHAVE}", "Content-Type": "application/json"}
-        # Modelo estável llama-3.1-8b-instant
-        dados = {"model": "llama-3.1-8b-instant", "messages": [{"role": "system", "content": sistema}, {"role": "user", "content": mensagem}], "temperature": 0.3}
-        resp = requests.post(url, headers=headers, json=dados).json()
-        return resp['choices'][0]['message']['content']
-    except: return "Assistente temporariamente indisponível. Prossiga para o agendamento."
+    """Atualizado para usar Google Gemini 2.5 Flash"""
+    MODELO = "gemini-2.5-flash-preview-09-2025"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODELO}:generateContent?key={MINHA_CHAVE}"
+    
+    payload = {
+        "contents": [{
+            "parts": [{"text": mensagem}]
+        }],
+        "systemInstruction": {
+            "parts": [{"text": sistema}]
+        }
+    }
+    
+    # Exponential Backoff para evitar erros de limite de requisição
+    for i in range(3):
+        try:
+            response = requests.post(url, json=payload)
+            if response.status_code == 200:
+                result = response.json()
+                return result['candidates'][0]['content']['parts'][0]['text']
+            elif response.status_code == 429:
+                time.sleep(2**i)
+                continue
+            else:
+                return "Assistente temporariamente indisponível. Prossiga para o agendamento."
+        except:
+            time.sleep(1)
+    return "Assistente temporariamente indisponível. Prossiga para o agendamento."
 
 def buscar_horarios_livres(service_calendar):
     sugestoes = []
