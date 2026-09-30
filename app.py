@@ -12,7 +12,6 @@ from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 
 # --- 🔐 CONFIGURAÇÕES VIA SECRETS ---
-# Certifique-se de que no Streamlit Cloud a "MINHA_CHAVE" seja a sua API KEY do Google Gemini
 MINHA_CHAVE = st.secrets["MINHA_CHAVE"]
 ID_AGENDA = st.secrets["ID_AGENDA"]
 
@@ -93,34 +92,63 @@ def conectar_google():
         return None, None
 
 def consultar_ia(mensagem, sistema):
-    """Atualizado para usar Google Gemini 2.5 Flash"""
-    MODELO = "gemini-2.5-flash-preview-09-2025"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODELO}:generateContent?key={MINHA_CHAVE}"
+    """
+    Detecta automaticamente o provedor da chave (Groq ou Google Gemini)
+    e executa a requisição com retentativas.
+    """
+    chave = MINHA_CHAVE.strip()
     
-    payload = {
-        "contents": [{
-            "parts": [{"text": mensagem}]
-        }],
-        "systemInstruction": {
-            "parts": [{"text": sistema}]
+    # 1. Caso seja chave da GROQ (inicia com 'gsk_')
+    if chave.startswith("gsk_"):
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {chave}", "Content-Type": "application/json"}
+        dados = {
+            "model": "llama-3.1-8b-instant",
+            "messages": [
+                {"role": "system", "content": sistema},
+                {"role": "user", "content": mensagem}
+            ],
+            "temperature": 0.3
         }
-    }
-    
-    # Exponential Backoff para evitar erros de limite de requisição
-    for i in range(3):
-        try:
-            response = requests.post(url, json=payload)
-            if response.status_code == 200:
-                result = response.json()
-                return result['candidates'][0]['content']['parts'][0]['text']
-            elif response.status_code == 429:
-                time.sleep(2**i)
-                continue
-            else:
-                return "Assistente temporariamente indisponível. Prossiga para o agendamento."
-        except:
-            time.sleep(1)
-    return "Assistente temporariamente indisponível. Prossiga para o agendamento."
+        for tentativa in range(3):
+            try:
+                resp = requests.post(url, headers=headers, json=dados, timeout=20)
+                if resp.status_code == 200:
+                    return resp.json()['choices'][0]['message']['content']
+                elif resp.status_code == 429:
+                    time.sleep(2 ** tentativa)
+                    continue
+                else:
+                    st.warning(f"Aviso API Groq (Status {resp.status_code}): {resp.text[:120]}")
+                    break
+            except Exception as err:
+                time.sleep(1)
+        return "Assistente temporariamente indisponível. Prossiga para o agendamento."
+
+    # 2. Caso seja chave do GOOGLE GEMINI (AI Studio)
+    else:
+        modelo = "gemini-2.5-flash"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={chave}"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "contents": [{"parts": [{"text": mensagem}]}],
+            "systemInstruction": {"parts": [{"text": sistema}]}
+        }
+        for tentativa in range(3):
+            try:
+                resp = requests.post(url, headers=headers, json=payload, timeout=20)
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    return res_json['candidates'][0]['content']['parts'][0]['text']
+                elif resp.status_code == 429:
+                    time.sleep(2 ** tentativa)
+                    continue
+                else:
+                    st.warning(f"Aviso API Gemini (Status {resp.status_code}): {resp.text[:120]}")
+                    break
+            except Exception as err:
+                time.sleep(1)
+        return "Assistente temporariamente indisponível. Prossiga para o agendamento."
 
 def buscar_horarios_livres(service_calendar):
     sugestoes = []
