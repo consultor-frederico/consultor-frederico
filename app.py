@@ -226,6 +226,16 @@ def salvar_na_planilha(client_sheets, dados):
         logger.exception("Falha ao salvar o atendimento na planilha")
         return False
 
+def gerar_entendimento(dados, complemento, conteudo_doc):
+    """Resumo mostrado ao cliente: prova que entendemos o pedido, sem valores nem análise final."""
+    trecho_doc = conteudo_doc[:6000] if conteudo_doc else "Nenhum documento anexado."
+    p_res = (f"RELATO INICIAL: {dados.get('relato', '')} | COMPLEMENTO: {complemento} | "
+             f"DOCUMENTO (trecho): {trecho_doc}. "
+             "Tarefa: mostre ao cliente que entendeu o pedido. Liste em tópicos curtos o que foi entendido "
+             "(serviço, período, verbas ou pontos citados). NÃO calcule nem estime valores, não dê opinião "
+             "jurídica nem prognóstico. Termine dizendo que o Frederico fará a análise completa.")
+    return consultar_ia(p_res, "Assistente Jurídico.")
+
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
     # CSS PARA ESCONDER ÍCONES
@@ -238,6 +248,7 @@ def main():
     if 'relato_complementar' not in st.session_state: st.session_state.relato_complementar = "Não enviado"
     if 'conteudo_arquivo' not in st.session_state: st.session_state.conteudo_arquivo = ""
     if 'nome_arquivo' not in st.session_state: st.session_state.nome_arquivo = "Não enviado"
+    if 'resumo_pedido' not in st.session_state: st.session_state.resumo_pedido = ""
 
     client_sheets, service_calendar = conectar_google()
 
@@ -290,7 +301,7 @@ def main():
             else:
                 st.session_state.dados_form.update({"nome": nome, "resp": resp, "tel": tel, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico, "adm": adm, "sai": sai, "salario": salario, "relato": relato, "prazo": prazo})
                 with st.spinner("Analisando..."):
-                    p = f"Aja como assistente do Frederico. CLIENTE: {nome} | PERFIL: {tipo} | SERVIÇO: {servico}. Datas: {adm}-{sai}. Salário: {salario}. Prazo: {prazo}. REGRAS: Use Dr/Dra se Advogado, senão Sr/Sra. Vá direto à saudação. Confirme cordial e convide ao agendamento."
+                    p = f"Aja como assistente do Frederico. CLIENTE: {nome} | PERFIL: {tipo} | SERVIÇO: {servico}. REGRAS: Use Dr/Dra se Advogado, senão Sr/Sra. Vá direto à saudação. Diga que o pedido foi recebido e que o Frederico fará a análise. NÃO mencione valores, salários, honorários, prazos ou resultados. Convide a complementar com detalhes e documentos e a agendar."
                     st.session_state.ia_inicial = consultar_ia(p, "Assistente Jurídico.")
                     st.session_state.fase = 2; st.rerun()
 
@@ -304,13 +315,29 @@ def main():
                 st.session_state.relato_complementar = rel_comp
                 p_comp = f"O usuário {st.session_state.dados_form['nome']} ({st.session_state.dados_form['tipo']}) complementou: {rel_comp}. Responda cordial com Dr/Dra ou Sr/Sra."
                 st.session_state.ia_resposta_complementar = consultar_ia(p_comp, "Assistente Jurídico.")
+                st.session_state.resumo_pedido = ""
                 st.rerun()
         elif opcao == "Enviar documentos":
             arquivo = st.file_uploader("Anexar PDF", type=["pdf"])
             if arquivo:
                 st.session_state.nome_arquivo = arquivo.name
                 st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo)
+                st.session_state.resumo_pedido = ""
                 st.success("Arquivo pronto.")
+
+        if not st.session_state.resumo_pedido:
+            with st.spinner("Lendo seu pedido..."):
+                st.session_state.resumo_pedido = gerar_entendimento(
+                    st.session_state.dados_form, st.session_state.relato_complementar, st.session_state.conteudo_arquivo)
+        st.markdown("**Entendemos que o seu pedido é:**")
+        st.info(st.session_state.resumo_pedido)
+        if st.session_state.conteudo_arquivo:
+            st.caption("Os documentos anexados foram usados para montar este entendimento.")
+        if st.button("🔄 Atualizar entendimento"):
+            with st.spinner("Atualizando..."):
+                st.session_state.resumo_pedido = gerar_entendimento(
+                    st.session_state.dados_form, st.session_state.relato_complementar, st.session_state.conteudo_arquivo)
+            st.rerun()
 
         c1, c2 = st.columns(2)
         if c1.button("✅ Confirmar e Agendar"): st.session_state.fase = 4; st.rerun()
