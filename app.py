@@ -43,6 +43,10 @@ SCOPES = [
 
 NOME_PLANILHA_GOOGLE = 'Atendimento_Fred'
 
+# Logo da marca (assets/logo.png, na raiz do repositório)
+import os
+LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo.png")
+
 # --- CALLBACKS DE FORMATAÇÃO ---
 
 def formatar_cnpj_callback():
@@ -237,11 +241,12 @@ def main():
 
     client_sheets, service_calendar = conectar_google()
 
-    col_logo, col_text = st.columns([1, 4])
-    with col_logo: st.markdown("<h1 style='text-align: center; margin-top: 5px;'>📟</h1>", unsafe_allow_html=True)
-    with col_text:
-        st.markdown("<h1 style='margin-bottom: -15px;'>Frederico Novotny</h1>", unsafe_allow_html=True)
-        st.markdown("<h3 style='color: gray;'>Consultor Trabalhista</h3>", unsafe_allow_html=True)
+    # Cabeçalho com a marca: logo centralizado e subtítulo na paleta azul-marinho e dourado
+    st.image(LOGO_PATH, width=220)
+    st.markdown(
+        "<p style='text-align:center; color:#C9A227; letter-spacing:3px; margin-top:-8px;'>CÁLCULOS TRABALHISTAS</p>",
+        unsafe_allow_html=True,
+    )
     st.divider()
 
     if st.session_state.fase == 1:
