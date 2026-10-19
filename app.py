@@ -242,9 +242,12 @@ def main():
     client_sheets, service_calendar = conectar_google()
 
     # Cabeçalho com a marca: logo centralizado e subtítulo na paleta azul-marinho e dourado
-    st.image(LOGO_PATH, width=220)
+    # Faixa azul-marinho que acomoda o logo sem depender do fundo branco da página
+    logo_b64 = open(os.path.join(os.path.dirname(LOGO_PATH), "logo_b64.txt")).read().strip()
     st.markdown(
-        "<p style='text-align:center; color:#C9A227; letter-spacing:3px; margin-top:-8px;'>CÁLCULOS TRABALHISTAS</p>",
+        f"""<div style='background:#1B2A4A; border-radius:14px; padding:18px; text-align:center; margin-bottom:6px;'>
+            <img src='data:image/png;base64,{logo_b64}' style='width:260px; max-width:100%; border-radius:10px;' alt='Frederico Novotny - Cálculos Trabalhistas'/>
+        </div>""",
         unsafe_allow_html=True,
     )
     st.divider()
