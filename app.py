@@ -1,15 +1,17 @@
 import streamlit as st
-import datetime
 import json
-import requests
-import gspread
+import logging
 import re
-import PyPDF2
 import time
 from io import BytesIO
+from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta
+
+import PyPDF2
+import gspread
+import requests
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from datetime import datetime, timedelta
 
 # --- 🔐 CONFIGURAÇÕES VIA SECRETS ---
 MINHA_CHAVE = st.secrets["MINHA_CHAVE"]
@@ -17,15 +19,29 @@ ID_AGENDA = st.secrets["ID_AGENDA"]
 
 st.set_page_config(page_title="Consultor Frederico - Cálculos", page_icon="🧮")
 
+logger = logging.getLogger("consultor_frederico")
+TZ = ZoneInfo("America/Sao_Paulo")
+
+# --- IA ---
+MODELO_GEMINI = "gemini-2.5-flash"
+MODELO_GROQ = "llama-3.1-8b-instant"
+MAX_TENTATIVAS_IA = 4          # tentativas com espera crescente (1s, 2s, 4s, 8s)
+TIMEOUT_IA = 30                # segundos por requisição
+CODIGOS_RETENTAVEL = (429, 500, 502, 503, 504)
+MENSAGEM_IA_INDISPONIVEL = (
+    "No momento não consegui gerar a análise automática. "
+    "Seu pedido foi registrado; siga para o agendamento."
+)
+
 FERIADOS_NACIONAIS = ["01/01", "21/04", "01/05", "07/09", "12/10", "02/11", "15/11", "25/12"]
 
 SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets', 
+    'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/calendar'
 ]
 
-NOME_PLANILHA_GOOGLE = 'Atendimento_Fred' 
+NOME_PLANILHA_GOOGLE = 'Atendimento_Fred'
 
 # --- CALLBACKS DE FORMATAÇÃO ---
 
@@ -60,7 +76,8 @@ def formatar_salario_callback():
     try:
         valor_float = float(temp)
         st.session_state.sal_input = f"R$ {valor_float:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    except: pass
+    except ValueError:
+        pass
 
 def formatar_tel_callback():
     val = st.session_state.tel_input
@@ -80,7 +97,9 @@ def ler_conteudo_arquivo(uploaded_file):
             texto = "\n".join([p.extract_text() for p in leitor.pages if p.extract_text()])
             return texto
         return str(uploaded_file.read(), "utf-8")
-    except: return "[Erro na leitura técnica do arquivo]"
+    except Exception:
+        logger.exception("Falha ao ler o arquivo anexado")
+        return "[Erro na leitura técnica do arquivo]"
 
 def conectar_google():
     try:
@@ -88,81 +107,81 @@ def conectar_google():
         creds = Credentials.from_service_account_info(info_chaves, scopes=SCOPES)
         return gspread.authorize(creds), build('calendar', 'v3', credentials=creds)
     except Exception as e:
+        logger.exception("Falha na conexão com o Google")
         st.error(f"❌ Erro de Conexão Google: {e}")
         return None, None
 
 def consultar_ia(mensagem, sistema):
     """
-    Detecta automaticamente o provedor da chave (Groq ou Google Gemini)
-    e executa a requisição com retentativas.
+    Envia a mensagem ao provedor de IA (Groq se a chave começa com 'gsk_', senão Google Gemini).
+    Retenta com espera crescente apenas em erros temporários (limite de uso, instabilidade).
+    Em falha definitiva, registra o motivo no log e devolve uma mensagem neutra para o cliente.
     """
     chave = MINHA_CHAVE.strip()
-    
-    # 1. Caso seja chave da GROQ (inicia com 'gsk_')
+
     if chave.startswith("gsk_"):
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {chave}", "Content-Type": "application/json"}
         dados = {
-            "model": "llama-3.1-8b-instant",
+            "model": MODELO_GROQ,
             "messages": [
                 {"role": "system", "content": sistema},
                 {"role": "user", "content": mensagem}
             ],
             "temperature": 0.3
         }
-        for tentativa in range(3):
-            try:
-                resp = requests.post(url, headers=headers, json=dados, timeout=20)
-                if resp.status_code == 200:
-                    return resp.json()['choices'][0]['message']['content']
-                elif resp.status_code == 429:
-                    time.sleep(2 ** tentativa)
-                    continue
-                else:
-                    st.warning(f"Aviso API Groq (Status {resp.status_code}): {resp.text[:120]}")
-                    break
-            except Exception as err:
-                time.sleep(1)
-        return "Assistente temporariamente indisponível. Prossiga para o agendamento."
-
-    # 2. Caso seja chave do GOOGLE GEMINI (AI Studio)
+        extrair = lambda j: j['choices'][0]['message']['content']
     else:
-        modelo = "gemini-2.5-flash"
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={chave}"
-        headers = {"Content-Type": "application/json"}
-        payload = {
+        # A chave vai no cabeçalho, não na URL, para não aparecer em logs.
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODELO_GEMINI}:generateContent"
+        headers = {"Content-Type": "application/json", "x-goog-api-key": chave}
+        dados = {
             "contents": [{"parts": [{"text": mensagem}]}],
             "systemInstruction": {"parts": [{"text": sistema}]}
         }
-        for tentativa in range(3):
-            try:
-                resp = requests.post(url, headers=headers, json=payload, timeout=20)
-                if resp.status_code == 200:
-                    res_json = resp.json()
-                    return res_json['candidates'][0]['content']['parts'][0]['text']
-                elif resp.status_code == 429:
-                    time.sleep(2 ** tentativa)
-                    continue
-                else:
-                    st.warning(f"Aviso API Gemini (Status {resp.status_code}): {resp.text[:120]}")
-                    break
-            except Exception as err:
-                time.sleep(1)
-        return "Assistente temporariamente indisponível. Prossiga para o agendamento."
+        extrair = lambda j: j['candidates'][0]['content']['parts'][0]['text']
+
+    ultimo_erro = "sem resposta"
+    for tentativa in range(MAX_TENTATIVAS_IA):
+        try:
+            resp = requests.post(url, headers=headers, json=dados, timeout=TIMEOUT_IA)
+            if resp.status_code == 200:
+                return extrair(resp.json())
+            ultimo_erro = f"HTTP {resp.status_code}: {resp.text[:200]}"
+            if resp.status_code not in CODIGOS_RETENTAVEL:
+                break  # erro definitivo (chave inválida, modelo errado etc.): não adianta repetir
+        except (requests.RequestException, KeyError, IndexError, ValueError) as err:
+            ultimo_erro = repr(err)
+        time.sleep(2 ** tentativa)
+
+    logger.error("IA indisponível após %s tentativa(s). Último erro: %s", tentativa + 1, ultimo_erro)
+    return MENSAGEM_IA_INDISPONIVEL
 
 def buscar_horarios_livres(service_calendar):
     sugestoes = []
-    dia_foco = datetime.now() + timedelta(days=1)
+    dia_foco = datetime.now(TZ) + timedelta(days=1)
     while len(sugestoes) < 12:
         if dia_foco.weekday() >= 5 or dia_foco.strftime("%d/%m") in FERIADOS_NACIONAIS:
             dia_foco += timedelta(days=1); continue
-        inicio_iso = dia_foco.replace(hour=9, minute=0, second=0).isoformat() + 'Z'
-        fim_iso = dia_foco.replace(hour=18, minute=0, second=0).isoformat() + 'Z'
+        # Janela em horário de Brasília, com fuso explícito (antes saía deslocada em 3h).
+        inicio = dia_foco.replace(hour=9, minute=0, second=0, microsecond=0)
+        fim = dia_foco.replace(hour=18, minute=0, second=0, microsecond=0)
         try:
-            events_result = service_calendar.events().list(calendarId=ID_AGENDA, timeMin=inicio_iso, timeMax=fim_iso, singleEvents=True, orderBy='startTime').execute()
-            events = events_result.get('items', [])
-            horas_ocupadas = [datetime.fromisoformat(e['start'].get('dateTime').replace('Z', '')).hour for e in events if 'dateTime' in e['start']]
-        except: horas_ocupadas = []
+            events_result = service_calendar.events().list(
+                calendarId=ID_AGENDA,
+                timeMin=inicio.isoformat(),
+                timeMax=fim.isoformat(),
+                singleEvents=True,
+                orderBy='startTime'
+            ).execute()
+            horas_ocupadas = [
+                datetime.fromisoformat(e['start']['dateTime']).astimezone(TZ).hour
+                for e in events_result.get('items', [])
+                if 'dateTime' in e.get('start', {})
+            ]
+        except Exception:
+            logger.exception("Falha ao consultar a agenda; horários podem estar desatualizados")
+            horas_ocupadas = []
         dia_txt = f"{dia_foco.strftime('%d/%m')} ({['Seg','Ter','Qua','Qui','Sex'][dia_foco.weekday()]})"
         for h in range(9, 18):
             if h != 12 and h not in horas_ocupadas: sugestoes.append(f"{dia_txt} às {h}:00")
@@ -173,11 +192,19 @@ def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
     try:
         partes = horario_texto.split(" às ")
         data_pt, hora_pt = partes[0].split(" ")[0], partes[1]
-        data_c = datetime.strptime(f"{data_pt}/{datetime.now().year} {hora_pt}", "%d/%m/%Y %H:%M")
-        evento = {'summary': f'Cálculo: {nome} ({servico})', 'description': f'WhatsApp: {tel}', 'start': {'dateTime': data_c.isoformat(), 'timeZone': 'America/Sao_Paulo'}, 'end': {'dateTime': (data_c + timedelta(hours=1)).isoformat(), 'timeZone': 'America/Sao_Paulo'}}
+        ano = datetime.now(TZ).year
+        data_c = datetime.strptime(f"{data_pt}/{ano} {hora_pt}", "%d/%m/%Y %H:%M")
+        evento = {
+            'summary': f'Cálculo: {nome} ({servico})',
+            'description': f'WhatsApp: {tel}',
+            'start': {'dateTime': data_c.isoformat(), 'timeZone': 'America/Sao_Paulo'},
+            'end': {'dateTime': (data_c + timedelta(hours=1)).isoformat(), 'timeZone': 'America/Sao_Paulo'}
+        }
         service_calendar.events().insert(calendarId=ID_AGENDA, body=evento).execute()
         return "Agendado com Sucesso"
-    except: return "Erro Agenda"
+    except Exception:
+        logger.exception("Falha ao criar evento na agenda para %s", horario_texto)
+        return "Erro Agenda"
 
 def salvar_na_planilha(client_sheets, dados):
     try:
@@ -186,12 +213,14 @@ def salvar_na_planilha(client_sheets, dados):
             sheet.append_row(["Data", "Tipo", "Nome/Razão", "Responsável", "Contato", "Email", "CNPJ", "Horário", "Serviço", "Data Prazo", "Relato Inicial", "IA Inicial", "Relato Comp.", "IA Resposta Comp.", "Arquivo", "Análise Profunda Fred", "Status"])
         linha = [
             dados['data_hora'], dados['tipo'], dados['nome'], dados.get('resp', ''), dados['tel'], dados['email'], dados.get('cnpj', ''),
-            dados['melhor_horario'], dados['servico'], dados.get('prazo', ''), dados['relato'], dados['ia_inicial'], 
+            dados['melhor_horario'], dados['servico'], dados.get('prazo', ''), dados['relato'], dados['ia_inicial'],
             dados['complemento_relato'], dados['ia_resposta_complementar'], dados['nome_arquivo'], dados['analise_profunda'], dados['status_agenda']
         ]
         sheet.append_row(linha)
         return True
-    except: return False
+    except Exception:
+        logger.exception("Falha ao salvar o atendimento na planilha")
+        return False
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
@@ -219,7 +248,7 @@ def main():
         st.subheader("1. Identificação e Caso")
         d = st.session_state.dados_form
         tipo = st.radio("Perfil:", ["Advogado", "Empresa", "Colaborador"], horizontal=True, index=["Advogado", "Empresa", "Colaborador"].index(d.get("tipo", "Advogado")))
-        
+
         col1, col2 = st.columns(2)
         if tipo == "Empresa":
             nome = col1.text_input("Razão Social", value=d.get("nome", ""))
@@ -232,20 +261,20 @@ def main():
             email = col2.text_input("E-mail", value=d.get("email", ""))
             tel = st.text_input("WhatsApp", key="tel_input", on_change=formatar_tel_callback, value=d.get("tel", ""))
             cnpj = ""; resp = nome
-        
+
         opcoes = ["Liquidação", "Iniciais", "Impugnação", "Rescisão", "Horas Extras", "Outros"] if tipo == "Advogado" else ["Rescisão", "Horas Extras", "Outros"]
         servico = st.selectbox("Serviço:", opcoes, index=opcoes.index(d.get("servico")) if d.get("servico") in opcoes else 0)
-        
+
         c_adm, c_sai = st.columns(2)
         adm = c_adm.text_input("Admissão (DDMMAAAA)", key="adm_input", on_change=formatar_data_adm_callback, value=d.get("adm", ""))
         sai = c_sai.text_input("Saída (DDMMAAAA)", key="sai_input", on_change=formatar_data_sai_callback, value=d.get("sai", ""))
-        
+
         col_sal, col_prazo = st.columns(2)
         salario = col_sal.text_input("Salário Base", key="sal_input", on_change=formatar_salario_callback, value=d.get("salario", ""))
         if tipo == "Advogado":
             prazo = col_prazo.text_input("Data Prazo/Citação", key="prazo_input", on_change=formatar_data_prazo_callback, value=d.get("prazo", ""))
         else: prazo = ""
-        
+
         relato = st.text_area("Explique sua demanda:", value=d.get("relato", ""))
 
         if st.button("💬 Analisar Solicitação"):
@@ -263,7 +292,7 @@ def main():
         opcao = st.radio("Deseja complementar?", ["Apenas seguir para agenda", "Adicionar detalhes", "Enviar documentos"], horizontal=True)
         if opcao == "Adicionar detalhes":
             rel_comp = st.text_area("Complemento:", value=st.session_state.relato_complementar if st.session_state.relato_complementar != "Não enviado" else "")
-            if st.button("Salvar Detalhes"): 
+            if st.button("Salvar Detalhes"):
                 st.session_state.relato_complementar = rel_comp
                 p_comp = f"O usuário {st.session_state.dados_form['nome']} ({st.session_state.dados_form['tipo']}) complementou: {rel_comp}. Responda cordial com Dr/Dra ou Sr/Sra."
                 st.session_state.ia_resposta_complementar = consultar_ia(p_comp, "Assistente Jurídico.")
@@ -274,7 +303,7 @@ def main():
                 st.session_state.nome_arquivo = arquivo.name
                 st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo)
                 st.success("Arquivo pronto.")
-        
+
         c1, c2 = st.columns(2)
         if c1.button("✅ Confirmar e Agendar"): st.session_state.fase = 4; st.rerun()
         if c2.button("❌ Corrigir Dados"): st.session_state.fase = 1; st.rerun()
@@ -289,7 +318,9 @@ def main():
                 p_fred = f"PERITO: Analise INTEGRALMENTE: Relato 1: {d['relato']} | Relato 2: {st.session_state.relato_complementar} | Doc: {st.session_state.conteudo_arquivo}. Serviço: {d['servico']} | Salário: {d['salario']} | Prazo: {d['prazo']}. Forneça dificuldade, verbas, honorários sugeridos e riscos."
                 analise = consultar_ia(p_fred, "Perito Sênior")
                 status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
-                salvar_na_planilha(client_sheets, {**d, "data_hora": datetime.now().strftime("%d/%m %H:%M"), "melhor_horario": horario, "relato_inicial": d['relato'], "ia_inicial": st.session_state.ia_inicial, "complemento_relato": st.session_state.relato_complementar, "ia_resposta_complementar": st.session_state.ia_resposta_complementar, "nome_arquivo": st.session_state.nome_arquivo, "analise_profunda": analise, "status_agenda": status})
+                salvo = salvar_na_planilha(client_sheets, {**d, "data_hora": datetime.now(TZ).strftime("%d/%m %H:%M"), "melhor_horario": horario, "relato_inicial": d['relato'], "ia_inicial": st.session_state.ia_inicial, "complemento_relato": st.session_state.relato_complementar, "ia_resposta_complementar": st.session_state.ia_resposta_complementar, "nome_arquivo": st.session_state.nome_arquivo, "analise_profunda": analise, "status_agenda": status})
+                if not salvo or status != "Agendado com Sucesso":
+                    logger.error("Atendimento de %s concluído com falhas (planilha=%s, agenda=%s)", d['nome'], salvo, status)
                 st.session_state.fase = 5; st.rerun()
 
     if st.session_state.fase == 5:
