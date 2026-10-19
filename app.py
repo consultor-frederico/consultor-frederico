@@ -193,7 +193,9 @@ def buscar_horarios_livres(service_calendar):
         dia_foco += timedelta(days=1)
     return sugestoes[:15]
 
-def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico, protocolo=""):
+def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico, protocolo="", email=""):
+    """Cria o evento na agenda, com link do Google Meet, convite ao cliente e lembretes.
+    Devolve (status, link_meet). Se o Meet falhar, grava o evento sem Meet."""
     try:
         partes = horario_texto.split(" às ")
         data_pt, hora_pt = partes[0].split(" ")[0], partes[1]
@@ -201,15 +203,38 @@ def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico, pro
         data_c = datetime.strptime(f"{data_pt}/{ano} {hora_pt}", "%d/%m/%Y %H:%M")
         evento = {
             'summary': f'Cálculo {protocolo}: {nome} ({servico})'.replace('  ', ' '),
-            'description': f'WhatsApp: {tel}',
+            'description': f'WhatsApp: {tel}\nProtocolo: {protocolo}',
             'start': {'dateTime': data_c.isoformat(), 'timeZone': 'America/Sao_Paulo'},
-            'end': {'dateTime': (data_c + timedelta(hours=1)).isoformat(), 'timeZone': 'America/Sao_Paulo'}
+            'end': {'dateTime': (data_c + timedelta(hours=1)).isoformat(), 'timeZone': 'America/Sao_Paulo'},
+            'reminders': {'useDefault': False, 'overrides': [
+                {'method': 'email', 'minutes': 24 * 60},
+                {'method': 'popup', 'minutes': 60}]},
+            'conferenceData': {'createRequest': {
+                'requestId': f"meet-{protocolo or data_c.strftime('%Y%m%d%H%M')}",
+                'conferenceSolutionKey': {'type': 'hangoutsMeet'}}},
         }
-        service_calendar.events().insert(calendarId=ID_AGENDA, body=evento).execute()
-        return "Agendado com Sucesso"
+        convidar = bool(email and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email))
+        if convidar:
+            evento['attendees'] = [{'email': email}]
+
+        def inserir(body, com_meet):
+            kwargs = {'calendarId': ID_AGENDA, 'body': body, 'sendUpdates': 'all' if convidar else 'none'}
+            if com_meet:
+                kwargs['conferenceDataVersion'] = 1
+            return service_calendar.events().insert(**kwargs).execute()
+
+        # Tenta com Meet; se falhar, grava sem Meet.
+        try:
+            resultado = inserir(evento, True)
+            return "Agendado com Sucesso", resultado.get('hangoutLink', '')
+        except Exception:
+            logger.exception("Falha ao criar evento com Meet; gravando sem Meet")
+        corpo = {k: v for k, v in evento.items() if k != 'conferenceData'}
+        inserir(corpo, False)
+        return "Agendado com Sucesso", ""
     except Exception:
         logger.exception("Falha ao criar evento na agenda para %s", horario_texto)
-        return "Erro Agenda"
+        return "Erro Agenda", ""
 
 def salvar_na_planilha(client_sheets, dados):
     try:
@@ -280,6 +305,7 @@ def main():
     if 'resumo_consent' not in st.session_state: st.session_state.resumo_consent = None
     if 'protocolo' not in st.session_state: st.session_state.protocolo = ""
     if 'agenda_ok' not in st.session_state: st.session_state.agenda_ok = True
+    if 'meet_link' not in st.session_state: st.session_state.meet_link = ""
 
     client_sheets, service_calendar = conectar_google()
 
@@ -397,7 +423,8 @@ def main():
                 p_fred = f"PERITO: Analise INTEGRALMENTE: Relato 1: {d['relato']} | Relato 2: {st.session_state.relato_complementar} | Doc: {doc_analise}. Serviço: {d['servico']} | Salário: {d['salario']} | Prazo: {d['prazo']}. Forneça dificuldade, verbas, honorários sugeridos e riscos."
                 analise = consultar_ia(p_fred, "Perito Sênior")
                 st.session_state.protocolo = gerar_protocolo()
-                status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'], st.session_state.protocolo)
+                status, meet_link = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'], st.session_state.protocolo, d.get('email', ''))
+                st.session_state.meet_link = meet_link
                 st.session_state.agenda_ok = (status == "Agendado com Sucesso")
                 salvo = salvar_na_planilha(client_sheets, {**d, "data_hora": datetime.now(TZ).strftime("%d/%m %H:%M"), "melhor_horario": horario, "relato_inicial": d['relato'], "ia_inicial": st.session_state.ia_inicial, "complemento_relato": st.session_state.relato_complementar, "ia_resposta_complementar": st.session_state.ia_resposta_complementar, "nome_arquivo": st.session_state.nome_arquivo, "analise_profunda": analise, "status_agenda": status})
                 if not salvo or status != "Agendado com Sucesso":
@@ -409,6 +436,8 @@ def main():
         st.success("✅ Solicitação enviada! Consultor Frederico entrará em contato em breve.")
         if st.session_state.protocolo:
             st.info(f"Seu protocolo: **{st.session_state.protocolo}**. Guarde este número para referência.")
+        if st.session_state.meet_link:
+            st.info(f"Link da reunião no Google Meet: {st.session_state.meet_link}")
         if not st.session_state.agenda_ok:
             st.warning("Não conseguimos reservar o horário automaticamente. A equipe vai confirmar pelo WhatsApp informado.")
         st.button("🔄 Novo Atendimento", on_click=lambda: st.session_state.clear())
