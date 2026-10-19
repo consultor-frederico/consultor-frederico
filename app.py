@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import time
+import random
 from io import BytesIO
 from zoneinfo import ZoneInfo
 from datetime import datetime, timedelta
@@ -192,14 +193,14 @@ def buscar_horarios_livres(service_calendar):
         dia_foco += timedelta(days=1)
     return sugestoes[:15]
 
-def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico):
+def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico, protocolo=""):
     try:
         partes = horario_texto.split(" às ")
         data_pt, hora_pt = partes[0].split(" ")[0], partes[1]
         ano = datetime.now(TZ).year
         data_c = datetime.strptime(f"{data_pt}/{ano} {hora_pt}", "%d/%m/%Y %H:%M")
         evento = {
-            'summary': f'Cálculo: {nome} ({servico})',
+            'summary': f'Cálculo {protocolo}: {nome} ({servico})'.replace('  ', ' '),
             'description': f'WhatsApp: {tel}',
             'start': {'dateTime': data_c.isoformat(), 'timeZone': 'America/Sao_Paulo'},
             'end': {'dateTime': (data_c + timedelta(hours=1)).isoformat(), 'timeZone': 'America/Sao_Paulo'}
@@ -236,6 +237,32 @@ def gerar_entendimento(dados, complemento, conteudo_doc):
              "jurídica nem prognóstico. Termine dizendo que o Consultor Frederico fará a análise completa. Ao citar o profissional, use somente 'Consultor Frederico' (nunca 'Dr.' ou 'Dra.'). Não use tratamento de cortesia para o cliente no resumo.")
     return consultar_ia(p_res, "Assistente Jurídico.")
 
+def validar_formulario(email, adm, sai, prazo, salario):
+    """Checa os campos antes de enviar à IA. Devolve a lista de mensagens de erro."""
+    erros = []
+    def data(txt):
+        try:
+            return datetime.strptime(txt, "%d/%m/%Y")
+        except (ValueError, TypeError):
+            return None
+    if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        erros.append("E-mail inválido.")
+    da = data(adm) if adm else None
+    ds = data(sai) if sai else None
+    if adm and da is None: erros.append("Admissão inválida. Use o formato DD/MM/AAAA.")
+    if sai and ds is None: erros.append("Saída inválida. Use o formato DD/MM/AAAA.")
+    if da and ds and ds < da: erros.append("A data de saída é anterior à admissão.")
+    if prazo and data(prazo) is None: erros.append("Data do prazo inválida. Use o formato DD/MM/AAAA.")
+    if salario:
+        try:
+            float(salario.replace("R$", "").replace(".", "").replace(",", ".").strip())
+        except ValueError:
+            erros.append("Salário inválido. Use apenas números, por exemplo 3500,00.")
+    return erros
+
+def gerar_protocolo():
+    return f"FN{datetime.now(TZ):%y%m%d}-{random.randint(1000, 9999)}"
+
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
     # CSS PARA ESCONDER ÍCONES
@@ -249,6 +276,10 @@ def main():
     if 'conteudo_arquivo' not in st.session_state: st.session_state.conteudo_arquivo = ""
     if 'nome_arquivo' not in st.session_state: st.session_state.nome_arquivo = "Não enviado"
     if 'resumo_pedido' not in st.session_state: st.session_state.resumo_pedido = ""
+    if 'consent_ok' not in st.session_state: st.session_state.consent_ok = False
+    if 'resumo_consent' not in st.session_state: st.session_state.resumo_consent = None
+    if 'protocolo' not in st.session_state: st.session_state.protocolo = ""
+    if 'agenda_ok' not in st.session_state: st.session_state.agenda_ok = True
 
     client_sheets, service_calendar = conectar_google()
 
@@ -297,7 +328,10 @@ def main():
         relato = st.text_area("Explique sua demanda:", value=d.get("relato", ""))
 
         if st.button("💬 Analisar Solicitação"):
+            erros = validar_formulario(email, adm, sai, prazo, salario)
             if not nome or not tel: st.warning("Por favor, preencha Nome e WhatsApp.")
+            elif erros:
+                for e in erros: st.error(e)
             else:
                 st.session_state.dados_form.update({"nome": nome, "resp": resp, "tel": tel, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico, "adm": adm, "sai": sai, "salario": salario, "relato": relato, "prazo": prazo})
                 with st.spinner("Analisando..."):
@@ -324,19 +358,26 @@ def main():
                 st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo)
                 st.session_state.resumo_pedido = ""
                 st.success("Arquivo pronto.")
+                st.checkbox("Autorizo o envio do documento à IA, apenas para gerar o resumo e a análise interna.", key="consent_doc")
 
+        consent_ok = bool(st.session_state.conteudo_arquivo) and st.session_state.get("consent_doc", False)
+        st.session_state.consent_ok = consent_ok
+        if st.session_state.resumo_consent != consent_ok:
+            st.session_state.resumo_pedido = ""
+            st.session_state.resumo_consent = consent_ok
+        doc_para_ia = st.session_state.conteudo_arquivo if consent_ok else ""
         if not st.session_state.resumo_pedido:
             with st.spinner("Lendo seu pedido..."):
                 st.session_state.resumo_pedido = gerar_entendimento(
-                    st.session_state.dados_form, st.session_state.relato_complementar, st.session_state.conteudo_arquivo)
+                    st.session_state.dados_form, st.session_state.relato_complementar, doc_para_ia)
         st.markdown("**Entendemos que o seu pedido é:**")
         st.info(st.session_state.resumo_pedido)
-        if st.session_state.conteudo_arquivo:
-            st.caption("Os documentos anexados foram usados para montar este entendimento.")
-        if st.button("🔄 Atualizar entendimento"):
-            with st.spinner("Atualizando..."):
-                st.session_state.resumo_pedido = gerar_entendimento(
-                    st.session_state.dados_form, st.session_state.relato_complementar, st.session_state.conteudo_arquivo)
+        if consent_ok:
+            st.caption("O documento autorizado foi usado para montar este entendimento.")
+        if st.session_state.resumo_pedido == MENSAGEM_IA_INDISPONIVEL:
+            st.warning("Não consegui gerar o resumo agora. Tente novamente em instantes.")
+        if st.button("🔄 Tentar novamente" if st.session_state.resumo_pedido == MENSAGEM_IA_INDISPONIVEL else "🔄 Atualizar entendimento"):
+            st.session_state.resumo_pedido = ""
             st.rerun()
 
         c1, c2 = st.columns(2)
@@ -347,19 +388,30 @@ def main():
         st.subheader("🗓️ Escolha seu Horário")
         horarios = buscar_horarios_livres(service_calendar)
         horario = st.selectbox("Selecione um horário disponível:", horarios)
+        d_resumo = st.session_state.dados_form
+        st.write(f"**Serviço:** {d_resumo.get('servico', '')}  ·  **Horário escolhido:** {horario}")
         if st.button("✅ Finalizar Agendamento"):
             with st.spinner("Concluindo..."):
                 d = st.session_state.dados_form
-                p_fred = f"PERITO: Analise INTEGRALMENTE: Relato 1: {d['relato']} | Relato 2: {st.session_state.relato_complementar} | Doc: {st.session_state.conteudo_arquivo}. Serviço: {d['servico']} | Salário: {d['salario']} | Prazo: {d['prazo']}. Forneça dificuldade, verbas, honorários sugeridos e riscos."
+                doc_analise = st.session_state.conteudo_arquivo if st.session_state.consent_ok else "Não autorizado pelo cliente."
+                p_fred = f"PERITO: Analise INTEGRALMENTE: Relato 1: {d['relato']} | Relato 2: {st.session_state.relato_complementar} | Doc: {doc_analise}. Serviço: {d['servico']} | Salário: {d['salario']} | Prazo: {d['prazo']}. Forneça dificuldade, verbas, honorários sugeridos e riscos."
                 analise = consultar_ia(p_fred, "Perito Sênior")
-                status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'])
+                st.session_state.protocolo = gerar_protocolo()
+                status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'], st.session_state.protocolo)
+                st.session_state.agenda_ok = (status == "Agendado com Sucesso")
                 salvo = salvar_na_planilha(client_sheets, {**d, "data_hora": datetime.now(TZ).strftime("%d/%m %H:%M"), "melhor_horario": horario, "relato_inicial": d['relato'], "ia_inicial": st.session_state.ia_inicial, "complemento_relato": st.session_state.relato_complementar, "ia_resposta_complementar": st.session_state.ia_resposta_complementar, "nome_arquivo": st.session_state.nome_arquivo, "analise_profunda": analise, "status_agenda": status})
                 if not salvo or status != "Agendado com Sucesso":
                     logger.error("Atendimento de %s concluído com falhas (planilha=%s, agenda=%s)", d['nome'], salvo, status)
                 st.session_state.fase = 5; st.rerun()
 
     if st.session_state.fase == 5:
-        st.balloons(); st.success("✅ Solicitação enviada! Frederico Novotny entrará em contato em breve."); st.button("🔄 Novo Atendimento", on_click=lambda: st.session_state.clear())
+        st.balloons()
+        st.success("✅ Solicitação enviada! Consultor Frederico entrará em contato em breve.")
+        if st.session_state.protocolo:
+            st.info(f"Seu protocolo: **{st.session_state.protocolo}**. Guarde este número para referência.")
+        if not st.session_state.agenda_ok:
+            st.warning("Não conseguimos reservar o horário automaticamente. A equipe vai confirmar pelo WhatsApp informado.")
+        st.button("🔄 Novo Atendimento", on_click=lambda: st.session_state.clear())
 
 if __name__ == "__main__":
     main()
