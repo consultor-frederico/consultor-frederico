@@ -246,7 +246,7 @@ def main():
     logo_b64 = open(os.path.join(os.path.dirname(LOGO_PATH), "logo_b64.txt")).read().strip()
     st.markdown(
         f"""<div style='background:#1B2A4A; border-radius:14px; padding:18px; text-align:center; margin-bottom:6px;'>
-            <img src='data:image/png;base64,{logo_b64}' style='width:260px; max-width:100%; border-radius:10px;' alt='Frederico Novotny - Cálculos Trabalhistas'/>
+            <img src='data:image/png;base64,{logo_b64}' style='width:420px; max-width:100%; border-radius:10px;' alt='Frederico Novotny - Cálculos Trabalhistas'/>
         </div>""",
         unsafe_allow_html=True,
     )
