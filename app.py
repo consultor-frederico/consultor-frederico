@@ -233,7 +233,7 @@ def gerar_entendimento(dados, complemento, conteudo_doc):
              f"DOCUMENTO (trecho): {trecho_doc}. "
              "Tarefa: mostre ao cliente que entendeu o pedido. Liste em tópicos curtos o que foi entendido "
              "(serviço, período, verbas ou pontos citados). NÃO calcule nem estime valores, não dê opinião "
-             "jurídica nem prognóstico. Termine dizendo que o Consultor Frederico fará a análise completa. Ao citar o profissional, use somente 'Consultor Frederico' (nunca 'Dr.' ou 'Dra.').")
+             "jurídica nem prognóstico. Termine dizendo que o Consultor Frederico fará a análise completa. Ao citar o profissional, use somente 'Consultor Frederico' (nunca 'Dr.' ou 'Dra.'). Não use tratamento de cortesia para o cliente no resumo.")
     return consultar_ia(p_res, "Assistente Jurídico.")
 
 # --- APLICAÇÃO PRINCIPAL ---
@@ -301,7 +301,7 @@ def main():
             else:
                 st.session_state.dados_form.update({"nome": nome, "resp": resp, "tel": tel, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico, "adm": adm, "sai": sai, "salario": salario, "relato": relato, "prazo": prazo})
                 with st.spinner("Analisando..."):
-                    p = f"Aja como assistente do Consultor Frederico. CLIENTE: {nome} | PERFIL: {tipo} | SERVIÇO: {servico}. REGRAS: Use Dr/Dra se Advogado, senão Sr/Sra. Vá direto à saudação. Diga que o pedido foi recebido e que o Consultor Frederico fará a análise. Ao citar o profissional, use somente 'Consultor Frederico' (nunca 'Dr.' ou 'Dra.'). NÃO mencione valores, salários, honorários, prazos ou resultados. Convide a complementar com detalhes e documentos e a agendar."
+                    p = f"Aja como assistente do Consultor Frederico. CLIENTE: {nome} | PERFIL: {tipo} | SERVIÇO: {servico}. REGRAS: trate o cliente por Dr/Dra SOMENTE se o PERFIL for Advogado; para Empresa ou Colaborador use Sr/Sra. Vá direto à saudação. Diga que o pedido foi recebido e que o Consultor Frederico fará a análise. Ao citar o profissional, use somente 'Consultor Frederico' (nunca 'Dr.' ou 'Dra.'). NÃO mencione valores, salários, honorários, prazos ou resultados. Convide a complementar com detalhes e documentos e a agendar."
                     st.session_state.ia_inicial = consultar_ia(p, "Assistente Jurídico.")
                     st.session_state.fase = 2; st.rerun()
 
@@ -313,7 +313,7 @@ def main():
             rel_comp = st.text_area("Complemento:", value=st.session_state.relato_complementar if st.session_state.relato_complementar != "Não enviado" else "")
             if st.button("Salvar Detalhes"):
                 st.session_state.relato_complementar = rel_comp
-                p_comp = f"O usuário {st.session_state.dados_form['nome']} ({st.session_state.dados_form['tipo']}) complementou: {rel_comp}. Responda cordial com Dr/Dra ou Sr/Sra para o cliente; ao citar o profissional, use somente Consultor Frederico, nunca Dr."
+                p_comp = f"O usuário {st.session_state.dados_form['nome']} ({st.session_state.dados_form['tipo']}) complementou: {rel_comp}. Responda cordial. Trate o cliente por Dr/Dra SOMENTE se o perfil for Advogado; para Empresa ou Colaborador use Sr/Sra. Ao citar o profissional, use somente Consultor Frederico."
                 st.session_state.ia_resposta_complementar = consultar_ia(p_comp, "Assistente Jurídico.")
                 st.session_state.resumo_pedido = ""
                 st.rerun()
