@@ -238,6 +238,7 @@ def main():
     if 'relato_complementar' not in st.session_state: st.session_state.relato_complementar = "Não enviado"
     if 'conteudo_arquivo' not in st.session_state: st.session_state.conteudo_arquivo = ""
     if 'nome_arquivo' not in st.session_state: st.session_state.nome_arquivo = "Não enviado"
+    if 'resumo_pedido' not in st.session_state: st.session_state.resumo_pedido = ""
 
     client_sheets, service_calendar = conectar_google()
 
@@ -290,7 +291,7 @@ def main():
             else:
                 st.session_state.dados_form.update({"nome": nome, "resp": resp, "tel": tel, "email": email, "cnpj": cnpj, "tipo": tipo, "servico": servico, "adm": adm, "sai": sai, "salario": salario, "relato": relato, "prazo": prazo})
                 with st.spinner("Analisando..."):
-                    p = f"Aja como assistente do Frederico. CLIENTE: {nome} | PERFIL: {tipo} | SERVIÇO: {servico}. Datas: {adm}-{sai}. Salário: {salario}. Prazo: {prazo}. REGRAS: Use Dr/Dra se Advogado, senão Sr/Sra. Vá direto à saudação. Confirme cordial e convide ao agendamento."
+                    p = f"Aja como assistente do Frederico. CLIENTE: {nome} | PERFIL: {tipo} | SERVIÇO: {servico}. REGRAS: Use Dr/Dra se Advogado, senão Sr/Sra. Vá direto à saudação. Diga que o pedido foi recebido e que o Frederico fará a análise. NÃO mencione valores, salários, honorários, prazos ou resultados. Convide a complementar com detalhes e documentos e a agendar."
                     st.session_state.ia_inicial = consultar_ia(p, "Assistente Jurídico.")
                     st.session_state.fase = 2; st.rerun()
 
@@ -311,6 +312,21 @@ def main():
                 st.session_state.nome_arquivo = arquivo.name
                 st.session_state.conteudo_arquivo = ler_conteudo_arquivo(arquivo)
                 st.success("Arquivo pronto.")
+
+        if st.session_state.conteudo_arquivo:
+            st.caption("Os documentos anexados serão enviados ao provedor de IA apenas para gerar este resumo.")
+        if st.button("🔎 Gerar resumo do pedido"):
+            d = st.session_state.dados_form
+            trecho_doc = st.session_state.conteudo_arquivo[:6000] if st.session_state.conteudo_arquivo else "Nenhum documento anexado."
+            p_res = (f"RELATO INICIAL: {d.get('relato', '')} | COMPLEMENTO: {st.session_state.relato_complementar} | "
+                     f"DOCUMENTO (trecho): {trecho_doc}. "
+                     "Tarefa: liste em tópicos curtos o que foi entendido do pedido e dos documentos (serviço, período, "
+                     "verbas ou pontos citados). NÃO calcule nem estime valores. Termine dizendo que a análise final será feita pelo Frederico.")
+            with st.spinner("Lendo seu pedido..."):
+                st.session_state.resumo_pedido = consultar_ia(p_res, "Assistente Jurídico.")
+        if st.session_state.resumo_pedido:
+            st.markdown("**Resumo do que entendemos:**")
+            st.info(st.session_state.resumo_pedido)
 
         c1, c2 = st.columns(2)
         if c1.button("✅ Confirmar e Agendar"): st.session_state.fase = 4; st.rerun()
