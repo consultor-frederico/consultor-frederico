@@ -193,7 +193,7 @@ def buscar_horarios_livres(service_calendar):
         dia_foco += timedelta(days=1)
     return sugestoes[:15]
 
-def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico, protocolo=""):
+def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico, protocolo="", email=""):
     try:
         partes = horario_texto.split(" às ")
         data_pt, hora_pt = partes[0].split(" ")[0], partes[1]
@@ -205,6 +205,19 @@ def criar_evento_agenda(service_calendar, horario_texto, nome, tel, servico, pro
             'start': {'dateTime': data_c.isoformat(), 'timeZone': 'America/Sao_Paulo'},
             'end': {'dateTime': (data_c + timedelta(hours=1)).isoformat(), 'timeZone': 'America/Sao_Paulo'}
         }
+        # Convida o cliente por e-mail, com lembretes de 1 dia e 1 hora antes.
+        evento['reminders'] = {'useDefault': False, 'overrides': [
+            {'method': 'email', 'minutes': 24 * 60},
+            {'method': 'popup', 'minutes': 60}]}
+        if email and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            evento['attendees'] = [{'email': email}]
+            try:
+                service_calendar.events().insert(calendarId=ID_AGENDA, body=evento, sendUpdates='all').execute()
+                return "Agendado com Sucesso"
+            except Exception:
+                # Se o convite falhar (permissão da conta de serviço, por exemplo), grava o evento sem convidado.
+                logger.exception("Convite ao cliente falhou; evento gravado sem convidado")
+                evento.pop('attendees', None)
         service_calendar.events().insert(calendarId=ID_AGENDA, body=evento).execute()
         return "Agendado com Sucesso"
     except Exception:
@@ -397,7 +410,7 @@ def main():
                 p_fred = f"PERITO: Analise INTEGRALMENTE: Relato 1: {d['relato']} | Relato 2: {st.session_state.relato_complementar} | Doc: {doc_analise}. Serviço: {d['servico']} | Salário: {d['salario']} | Prazo: {d['prazo']}. Forneça dificuldade, verbas, honorários sugeridos e riscos."
                 analise = consultar_ia(p_fred, "Perito Sênior")
                 st.session_state.protocolo = gerar_protocolo()
-                status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'], st.session_state.protocolo)
+                status = criar_evento_agenda(service_calendar, horario, d['nome'], d['tel'], d['servico'], st.session_state.protocolo, d.get('email', ''))
                 st.session_state.agenda_ok = (status == "Agendado com Sucesso")
                 salvo = salvar_na_planilha(client_sheets, {**d, "data_hora": datetime.now(TZ).strftime("%d/%m %H:%M"), "melhor_horario": horario, "relato_inicial": d['relato'], "ia_inicial": st.session_state.ia_inicial, "complemento_relato": st.session_state.relato_complementar, "ia_resposta_complementar": st.session_state.ia_resposta_complementar, "nome_arquivo": st.session_state.nome_arquivo, "analise_profunda": analise, "status_agenda": status})
                 if not salvo or status != "Agendado com Sucesso":
